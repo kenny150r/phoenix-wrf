@@ -108,7 +108,7 @@ subset_file() {
   local src="$1"
   local dest="$2"
   rm -f "$dest.sub"
-  if "$WGRIB2" "$src" -small_grib "$LONBOX" "$LATBOX" "$dest.sub" \
+  if "$WGRIB2" "$src" -inv /dev/null -small_grib "$LONBOX" "$LATBOX" "$dest.sub" \
       && [[ -s $dest.sub ]] && is_grib2 "$dest.sub"; then
     mv "$dest.sub" "$dest"
     require_regional "$dest"
@@ -156,7 +156,7 @@ aws_subset() {
   # Stream AWS → wgrib2 so the ~400 MB CONUS file never has to stay on disk.
   # -small_grib often needs a seekable file; fall back to one temp GRIB, then delete it.
   if wget -4 -q --timeout=180 --tries=3 -O - "$url" \
-      | "$WGRIB2" - -small_grib "$LONBOX" "$LATBOX" "$dest.sub" \
+      | "$WGRIB2" - -inv /dev/null -small_grib "$LONBOX" "$LATBOX" "$dest.sub" \
       && [[ -s $dest.sub ]] && is_grib2 "$dest.sub"; then
     mv "$dest.sub" "$dest"
     echo "aws-stream $dest ($(file_bytes "$dest") bytes)"
