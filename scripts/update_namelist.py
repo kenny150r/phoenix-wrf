@@ -68,10 +68,11 @@ def main():
     p.add_argument("--input", type=Path)
     p.add_argument("--date", required=True, help="YYYYMMDD cycle date")
     p.add_argument("--hours", type=int, default=18)
+    p.add_argument("--cycle-hour", type=int, default=12, help="UTC cycle hour (0 or 12)")
     p.add_argument("--nmet", type=int)
     p.add_argument("--nsoil", type=int)
     args = p.parse_args()
-    start = datetime.strptime(args.date + "12", "%Y%m%d%H")
+    start = datetime.strptime(f"{args.date}{args.cycle_hour:02d}", "%Y%m%d%H")
     end = start + timedelta(hours=args.hours)
     if args.wps:
         set_wps(args.wps, start, end)

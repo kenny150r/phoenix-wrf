@@ -23,11 +23,14 @@ POLICY=$(cat <<EOF
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "PublicReadForecastPngs",
+      "Sid": "PublicReadLatestAndRuns",
       "Effect": "Allow",
       "Principal": "*",
       "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::${BUCKET}/*"
+      "Resource": [
+        "arn:aws:s3:::${BUCKET}/latest.json",
+        "arn:aws:s3:::${BUCKET}/runs/*"
+      ]
     }
   ]
 }
@@ -72,6 +75,6 @@ aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-conf
 
 PLACE=$(mktemp)
 echo '{"status":"awaiting-first-run","bucket":"phx-wrf-forecast"}' > "$PLACE"
-aws s3 cp "$PLACE" "s3://$BUCKET/latest.json" --content-type application/json --cache-control 'public, max-age=60'
+aws s3 cp "$PLACE" "s3://$BUCKET/latest.json" --content-type application/json --cache-control 'public, max-age=10, must-revalidate'
 rm -f "$PLACE"
-echo "S3 bucket $BUCKET ready (public GetObject, CORS, 14-day lifecycle)"
+echo "S3 bucket $BUCKET ready (public GetObject on latest.json + runs/*, CORS, 14-day lifecycle)"

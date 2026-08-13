@@ -6,6 +6,7 @@ geog/
 WPS_GEOG/
 data/
 plots/
+work/
 *.exe
 *.o
 *.mod

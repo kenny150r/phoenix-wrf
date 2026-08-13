@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import shutil
+from datetime import datetime
 from glob import glob
 from pathlib import Path
 
@@ -494,138 +496,45 @@ def plot_placeholder(out_root: Path, cycle: str, hours: int) -> None:
     print(f"bounds={bounds}")
 
 
-def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
+def cycle_start(cycle: str) -> datetime:
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})T(\d{1,2})z$", cycle, re.I)
+    if not m:
+        raise ValueError(f"bad cycle {cycle}")
+    return datetime(int(m[1]), int(m[2]), int(m[3]), int(m[4]))
+
+
+def wrfout_hour(path: Path, start: datetime) -> int | None:
+    m = re.search(r"wrfout_d01_(\d{4}-\d{2}-\d{2})_(\d{2})[:_](\d{2})[:_](\d{2})", path.name)
+    if not m:
+        return None
+    t = datetime.strptime(f"{m[1]} {m[2]}:{m[3]}:{m[4]}", "%Y-%m-%d %H:%M:%S")
+    return int(round((t - start).total_seconds() / 3600.0))
+
+
+def list_wrfout_by_hour(wrfout_dir: Path, cycle: str) -> dict[int, Path]:
+    start = cycle_start(cycle)
+    out: dict[int, Path] = {}
+    for fn in sorted(glob(str(Path(wrfout_dir) / "wrfout_d01_*"))):
+        p = Path(fn)
+        h = wrfout_hour(p, start)
+        if h is not None:
+            out[h] = p
+    return out
+
+
+def overlays_exist(out_root: Path, hour: int) -> bool:
+    fxx = f"f{hour:02d}.png"
+    return all((out_root / prod / fxx).exists() for prod in ("refl", "precip", "t2", "wind", "cape"))
+
+
+def _write_meteogram(out_root: Path, series: dict) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from netCDF4 import Dataset
-    from wrf import getvar, latlon_coords, to_np
 
-    files = open_times(wrfout_dir)
-    rain_prev = None
-    series = {
-        "times": [],
-        "t2f": [],
-        "tdf": [],
-        "wspd": [],
-        "gust": [],
-        "precip_hour": [],
-        "precip_acc": [],
-    }
-    bounds = None
-    refl_cmap, refl_norm = nws_refl_cmap()
-    precip_cmap, precip_norm = nws_qpe_cmap()
-    t2_cm, t2_norm = t2_cmap()
-    wind_cm, wind_norm = wind_cmap()
-    cape_cm, cape_norm = cape_cmap()
-
-    for i, fn in enumerate(files):
-        nc = Dataset(fn)
-        tstr = "".join(c.decode() if isinstance(c, bytes) else c for c in nc.variables["Times"][0])
-        valid = tstr.replace("_", " ")
-        fxx = f"f{i:02d}"
-
-        lats, lons = latlon_coords(getvar(nc, "T2"))
-        lats = to_np(lats)
-        lons = to_np(lons)
-        if bounds is None:
-            bounds = domain_bounds_from_grid(lats, lons)
-
-        t2 = to_np(getvar(nc, "T2"))
-        t2f = t2 * 9 / 5 - 459.67
-        q2 = to_np(getvar(nc, "Q2"))
-        psfc = to_np(getvar(nc, "PSFC"))
-        td_c = dewpoint_c(q2, psfc)
-        tdf = td_c * 9 / 5 + 32
-
-        u10 = to_np(getvar(nc, "U10"))
-        v10 = to_np(getvar(nc, "V10"))
-        wspd = np.sqrt(u10**2 + v10**2) * 1.94384
-        gust = None
-        if "WSPD10MAX" in nc.variables:
-            gust = to_np(nc.variables["WSPD10MAX"][0]) * 1.94384
-
-        rainc = to_np(nc.variables["RAINC"][0]) if "RAINC" in nc.variables else 0
-        rainnc = to_np(nc.variables["RAINNC"][0]) if "RAINNC" in nc.variables else 0
-        acc = np.array(rainc + rainnc, dtype=float)
-        hour = acc * 0.0 if rain_prev is None else np.maximum(acc - rain_prev, 0)
-        rain_prev = acc
-
-        try:
-            dbz = to_np(getvar(nc, "mdbz"))
-        except Exception:
-            dbz = np.full_like(t2, np.nan)
-
-        try:
-            cape2d = getvar(nc, "cape_2d")
-            mucape = to_np(cape2d[0])
-        except Exception:
-            if "AFWA_CAPE" in nc.variables:
-                mucape = to_np(nc.variables["AFWA_CAPE"][0])
-            else:
-                mucape = np.full_like(t2, np.nan)
-
-        speed = gust if gust is not None else wspd
-
-        save_overlay(
-            out_root / "refl" / f"{fxx}.png",
-            lons,
-            lats,
-            dbz,
-            bounds,
-            cmap=refl_cmap,
-            norm=refl_norm,
-            mask_below=5,
-        )
-        save_overlay(
-            out_root / "precip" / f"{fxx}.png",
-            lons,
-            lats,
-            hour / 25.4,
-            bounds,
-            cmap=precip_cmap,
-            norm=precip_norm,
-            mask_below=0.01,
-        )
-        save_overlay(
-            out_root / "t2" / f"{fxx}.png",
-            lons,
-            lats,
-            t2f,
-            bounds,
-            cmap=t2_cm,
-            norm=t2_norm,
-        )
-        save_overlay(
-            out_root / "wind" / f"{fxx}.png",
-            lons,
-            lats,
-            speed,
-            bounds,
-            cmap=wind_cm,
-            norm=wind_norm,
-        )
-        save_overlay(
-            out_root / "cape" / f"{fxx}.png",
-            lons,
-            lats,
-            mucape,
-            bounds,
-            cmap=cape_cm,
-            norm=cape_norm,
-        )
-
-        j, iidx = nearest_ij(lats, lons, KPHX[0], KPHX[1])
-        series["times"].append(valid)
-        series["t2f"].append(float(t2f[j, iidx]))
-        series["tdf"].append(float(tdf[j, iidx]))
-        series["wspd"].append(float(wspd[j, iidx]))
-        series["gust"].append(float(speed[j, iidx]))
-        series["precip_hour"].append(float(hour[j, iidx] / 25.4))
-        series["precip_acc"].append(float(acc[j, iidx] / 25.4))
-        nc.close()
-
+    if not series["times"]:
+        return
     fig, axes = plt.subplots(3, 1, figsize=(10, 7.2), sharex=True, facecolor=DESK_INK)
     x = np.arange(len(series["times"]))
     for ax in axes:
@@ -658,11 +567,170 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
     plt.close(fig)
     shutil.copyfile(meteo, out_root / "meteogram" / "kphx.png")
 
+
+def plot_wrfout(
+    wrfout_dir: Path,
+    out_root: Path,
+    cycle: str,
+    only_hours: set[int] | None = None,
+    skip_existing: bool = False,
+) -> list[int]:
+    """Plot wrfout frames. Hour index comes from the valid time vs cycle start.
+
+    only_hours: if set, write overlays only for those forecast hours (meteogram
+    still uses every readable wrfout so precip deltas stay correct).
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from netCDF4 import Dataset
+    from wrf import getvar, latlon_coords, to_np
+
+    by_hour = list_wrfout_by_hour(wrfout_dir, cycle)
+    if not by_hour:
+        raise SystemExit(f"No wrfout files in {wrfout_dir}")
+
+    rain_prev = None
+    series = {
+        "times": [],
+        "t2f": [],
+        "tdf": [],
+        "wspd": [],
+        "gust": [],
+        "precip_hour": [],
+        "precip_acc": [],
+    }
+    bounds = None
+    refl_cmap, refl_norm = nws_refl_cmap()
+    precip_cmap, precip_norm = nws_qpe_cmap()
+    t2_cm, t2_norm = t2_cmap()
+    wind_cm, wind_norm = wind_cmap()
+    cape_cm, cape_norm = cape_cmap()
+    plotted: list[int] = []
+
+    for h in sorted(by_hour):
+        fn = by_hour[h]
+        nc = Dataset(fn)
+        tstr = "".join(c.decode() if isinstance(c, bytes) else c for c in nc.variables["Times"][0])
+        valid = tstr.replace("_", " ")
+        fxx = f"f{h:02d}"
+
+        lats, lons = latlon_coords(getvar(nc, "T2"))
+        lats = to_np(lats)
+        lons = to_np(lons)
+        if bounds is None:
+            bounds = domain_bounds_from_grid(lats, lons)
+
+        t2 = to_np(getvar(nc, "T2"))
+        t2f = t2 * 9 / 5 - 459.67
+        q2 = to_np(getvar(nc, "Q2"))
+        psfc = to_np(getvar(nc, "PSFC"))
+        td_c = dewpoint_c(q2, psfc)
+        tdf = td_c * 9 / 5 + 32
+
+        u10 = to_np(getvar(nc, "U10"))
+        v10 = to_np(getvar(nc, "V10"))
+        wspd = np.sqrt(u10**2 + v10**2) * 1.94384
+        gust = None
+        if "WSPD10MAX" in nc.variables:
+            gust = to_np(nc.variables["WSPD10MAX"][0]) * 1.94384
+
+        rainc = to_np(nc.variables["RAINC"][0]) if "RAINC" in nc.variables else 0
+        rainnc = to_np(nc.variables["RAINNC"][0]) if "RAINNC" in nc.variables else 0
+        acc = np.array(rainc + rainnc, dtype=float)
+        precip = acc * 0.0 if rain_prev is None else np.maximum(acc - rain_prev, 0)
+        rain_prev = acc
+        speed = gust if gust is not None else wspd
+
+        j, iidx = nearest_ij(lats, lons, KPHX[0], KPHX[1])
+        series["times"].append(valid)
+        series["t2f"].append(float(t2f[j, iidx]))
+        series["tdf"].append(float(tdf[j, iidx]))
+        series["wspd"].append(float(wspd[j, iidx]))
+        series["gust"].append(float(speed[j, iidx]))
+        series["precip_hour"].append(float(precip[j, iidx] / 25.4))
+        series["precip_acc"].append(float(acc[j, iidx] / 25.4))
+
+        want = only_hours is None or h in only_hours
+        if want and skip_existing and overlays_exist(out_root, h):
+            plotted.append(h)
+            nc.close()
+            continue
+        if not want:
+            nc.close()
+            continue
+
+        try:
+            dbz = to_np(getvar(nc, "mdbz"))
+        except Exception:
+            dbz = np.full_like(t2, np.nan)
+
+        try:
+            cape2d = getvar(nc, "cape_2d")
+            mucape = to_np(cape2d[0])
+        except Exception:
+            if "AFWA_CAPE" in nc.variables:
+                mucape = to_np(nc.variables["AFWA_CAPE"][0])
+            else:
+                mucape = np.full_like(t2, np.nan)
+
+        save_overlay(
+            out_root / "refl" / f"{fxx}.png",
+            lons,
+            lats,
+            dbz,
+            bounds,
+            cmap=refl_cmap,
+            norm=refl_norm,
+            mask_below=5,
+        )
+        save_overlay(
+            out_root / "precip" / f"{fxx}.png",
+            lons,
+            lats,
+            precip / 25.4,
+            bounds,
+            cmap=precip_cmap,
+            norm=precip_norm,
+            mask_below=0.01,
+        )
+        save_overlay(
+            out_root / "t2" / f"{fxx}.png",
+            lons,
+            lats,
+            t2f,
+            bounds,
+            cmap=t2_cm,
+            norm=t2_norm,
+        )
+        save_overlay(
+            out_root / "wind" / f"{fxx}.png",
+            lons,
+            lats,
+            speed,
+            bounds,
+            cmap=wind_cm,
+            norm=wind_norm,
+        )
+        save_overlay(
+            out_root / "cape" / f"{fxx}.png",
+            lons,
+            lats,
+            mucape,
+            bounds,
+            cmap=cape_cm,
+            norm=cape_norm,
+        )
+        plotted.append(h)
+        nc.close()
+
+    _write_meteogram(out_root, series)
     if bounds is None:
         bounds = domain_bounds_from_center()
-    write_meta(out_root, cycle, len(files), bounds, placeholder=False, kphx=series)
-    print(f"Wrote {len(files)} overlay frames under {out_root}")
+    write_meta(out_root, cycle, len(by_hour), bounds, placeholder=False, kphx=series)
+    print(f"Wrote {len(plotted)} overlay frames under {out_root} (hours={plotted})")
     print(f"bounds={bounds}")
+    return plotted
 
 
 def open_times(wrfout_dir: Path):
@@ -678,6 +746,8 @@ def main():
     p.add_argument("--out-dir", required=True)
     p.add_argument("--cycle", required=True, help="YYYYMMDDTHHz")
     p.add_argument("--hours", type=int, default=18)
+    p.add_argument("--only-hours", default=None, help="Comma-separated forecast hours to overlay")
+    p.add_argument("--skip-existing", action="store_true")
     p.add_argument(
         "--placeholder",
         action="store_true",
@@ -692,7 +762,10 @@ def main():
         return
     if not args.wrfout_dir:
         raise SystemExit("--wrfout-dir is required unless --placeholder")
-    plot_wrfout(Path(args.wrfout_dir), out_root, args.cycle)
+    only = None
+    if args.only_hours:
+        only = {int(x.strip()) for x in args.only_hours.split(",") if x.strip()}
+    plot_wrfout(Path(args.wrfout_dir), out_root, args.cycle, only_hours=only, skip_existing=args.skip_existing)
 
 
 if __name__ == "__main__":

@@ -106,12 +106,39 @@ ensure_md_calls() {
   fi
 }
 
+archive_share_into_lib() {
+  # WRF make -i can archive libwrflib.a before share/*.o exist.
+  local lib="$ROOT/src/WRF/main/libwrflib.a"
+  [[ -f $lib ]] || return 1
+  ar r "$lib" "$ROOT/src/WRF/share/"*.o "$ROOT/src/WRF/dyn_em/"*.o
+  # These two are also passed as loose .o files on the wrf.exe link line.
+  ar d "$lib" module_internal_header_util.o pack_utils.o 2>/dev/null || true
+  ranlib "$lib"
+}
+
+relink_wrf() {
+  echo "=== relinking wrf.exe / real.exe ==="
+  (
+    # shellcheck disable=SC1091
+    source "$ROOT/env.sh"
+    export WRF_SRC_ROOT_DIR="$ROOT/src/WRF"
+    export WRF_EM_CORE=1 WRF_NMM_CORE=0 WRF_DA_CORE=0 WRF_PLUS_CORE=0 WRF_NMM_NEST=0
+    archive_share_into_lib || true
+    make -C "$ROOT/src/WRF/main" WRF_SRC_ROOT_DIR="$WRF_SRC_ROOT_DIR" SOLVER=em IDEAL_CASE=real em_wrf em_real
+  )
+}
+
 if [[ ! -x main/wrf.exe ]]; then
   echo "=== compiling WRF em_real (this takes a while) ==="
-  # Drop leftover objects from a failed make -i so module_io.f90 is rebuilt.
-  ./clean || true
+  # Do not ./clean if objects already exist — make -i often just needs a relink.
+  if [[ ! -f main/libwrflib.a ]]; then
+    ./clean || true
+  fi
   ensure_md_calls
-  "$ROOT/opt/bin/csh" -c "setenv J 4; setenv NETCDF $NETCDF; setenv WRFIO_NCD_LARGE_FILE_SUPPORT 1; ./compile em_real"
+  "$ROOT/opt/bin/csh" -c "setenv J '-j 4'; setenv NETCDF $NETCDF; setenv WRFIO_NCD_LARGE_FILE_SUPPORT 1; ./compile em_real"
+  if [[ ! -x main/wrf.exe ]]; then
+    relink_wrf
+  fi
   ls -l main/wrf.exe main/real.exe
 fi
 
@@ -136,25 +163,25 @@ while IFS= read -r -d '' f; do
 done < <(grep -rlZ '^#!.*csh' . --include='*' 2>/dev/null || true)
 
 export WRF_DIR="$ROOT/src/WRF"
+export JASPERLIB="$ROOT/opt/grib2/lib"
+export JASPERINC="$ROOT/opt/grib2/include"
 if [[ ! -f configure.wps ]]; then
-  echo "=== configuring WPS (GNU serial GRIB2) ==="
-  # Prefer built-in grib2 libs if the flag exists; else option 3 + our Jasper
-  if ./configure --help 2>&1 | grep -q build-grib2; then
-    echo 1 | ./configure --build-grib2-libs
-  else
-    echo 3 | ./configure
-  fi
+  echo "=== configuring WPS (GNU serial GRIB2, existing Jasper) ==="
+  echo 3 | ./configure
   sed -i "s|^WRF_DIR *=.*|WRF_DIR = $ROOT/src/WRF|" configure.wps
   sed -i "s|^SFC *=.*|SFC = gfortran|" configure.wps || true
   sed -i "s|^SCC *=.*|SCC = gcc|" configure.wps || true
   if ! grep -q -- '-lnetcdff' configure.wps; then
     sed -i 's/-lnetcdf/-lnetcdff -lnetcdf/g' configure.wps || true
   fi
+  # Use the Jasper we already built (WPS --build-grib2-libs needs libjpeg-dev).
+  sed -i "s|^COMPRESSION_LIBS *=.*|COMPRESSION_LIBS    = -L$ROOT/opt/grib2/lib -L$ROOT/src/WPS/grib2/lib -ljasper -lpng -lz|" configure.wps
+  sed -i "s|^COMPRESSION_INC *=.*|COMPRESSION_INC     = -I$ROOT/opt/grib2/include -I$ROOT/src/WPS/grib2/include|" configure.wps
 fi
 
 if [[ ! -x geogrid.exe || ! -x ungrib.exe || ! -x metgrid.exe ]]; then
   echo "=== compiling WPS ==="
-  "$ROOT/opt/bin/csh" -c "setenv J 4; setenv WRF_DIR $ROOT/src/WRF; setenv NETCDF $NETCDF; setenv JASPERLIB $JASPERLIB; setenv JASPERINC $JASPERINC; ./compile"
+  "$ROOT/opt/bin/csh" -c "setenv J '-j 4'; setenv WRF_DIR $ROOT/src/WRF; setenv NETCDF $NETCDF; setenv JASPERLIB $JASPERLIB; setenv JASPERINC $JASPERINC; ./compile"
   ls -l geogrid.exe ungrib.exe metgrid.exe
 fi
 

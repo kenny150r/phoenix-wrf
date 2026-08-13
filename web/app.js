@@ -72,8 +72,14 @@ const LEGENDS = {
 };
 
 const banner = document.getElementById("banner");
+const statusStage = document.getElementById("status-stage");
+const statusMeta = document.getElementById("status-meta");
+const statusBarWrap = document.getElementById("status-progress-wrap");
+const statusBar = document.getElementById("status-progress-bar");
+const statusBarLabel = document.getElementById("status-progress-label");
 const hour = document.getElementById("hour");
 const hourLabel = document.getElementById("hour-label");
+const hourTicks = document.getElementById("hour-ticks");
 const validLabel = document.getElementById("valid-label");
 const playBtn = document.getElementById("play");
 const opacityInput = document.getElementById("opacity");
@@ -83,6 +89,8 @@ const legendEl = document.getElementById("legend");
 const frameError = document.getElementById("frame-error");
 const meteoPanel = document.getElementById("meteo-panel");
 const meteoImg = document.getElementById("meteo-img");
+
+const POLL_MS = 20000;
 
 let product = "refl";
 let latest = null;
@@ -138,7 +146,7 @@ L.circleMarker(DEFAULT_CENTER, {
   className: "city-label",
 }).addTo(map);
 
-function applyBounds(next) {
+function applyBounds(next, { fit = true } = {}) {
   if (!Array.isArray(next) || next.length !== 2) return;
   bounds = next;
   if (domainRect) map.removeLayer(domainRect);
@@ -150,7 +158,7 @@ function applyBounds(next) {
     dashArray: "4 5",
     interactive: false,
   }).addTo(map);
-  map.fitBounds(bounds, { padding: [48, 48], maxZoom: 10 });
+  if (fit) map.fitBounds(bounds, { padding: [48, 48], maxZoom: 10 });
   if (overlay) overlay.setBounds(bounds);
 }
 
@@ -182,10 +190,120 @@ function mstFromFxx(cycle, fxx) {
 function frameUrl(prod, fxx) {
   if (!latest) return "";
   const base = latest.base_url || `${BUCKET}/runs/${latest.cycle}`;
+  const bust = encodeURIComponent(latest.updated_at || latest.completed_at || Date.now());
   if (prod === "meteogram") {
-    return latest.meteogram_url || `${base}/meteogram/f00.png`;
+    const u = latest.meteogram_url || `${base}/meteogram/f00.png`;
+    return `${u}${u.includes("?") ? "&" : "?"}t=${bust}`;
   }
   return `${base}/${prod}/f${pad(fxx)}.png`;
+}
+
+function maxHour() {
+  return Number((latest && (latest.hours ?? latest.frames - 1)) || 18);
+}
+
+function availableHours() {
+  if (!latest) return [];
+  if (Array.isArray(latest.hours_available)) {
+    return latest.hours_available
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n >= 0)
+      .sort((a, b) => a - b);
+  }
+  const st = latest.status;
+  if (st === "complete" || st === "success" || st === "placeholder") {
+    return Array.from({ length: maxHour() + 1 }, (_, i) => i);
+  }
+  return [];
+}
+
+function hourIsReady(fxx) {
+  const hrs = availableHours();
+  if (!hrs.length && latest && (latest.status === "complete" || latest.status === "success" || latest.status === "placeholder")) {
+    return true;
+  }
+  return hrs.includes(Number(fxx));
+}
+
+function snapHour(requested) {
+  const hrs = availableHours();
+  const want = Number(requested);
+  if (!hrs.length) return 0;
+  if (hrs.includes(want)) return want;
+  const below = hrs.filter((h) => h <= want);
+  return below.length ? below[below.length - 1] : hrs[0];
+}
+
+function neighborHour(from, dir) {
+  const hrs = availableHours();
+  if (!hrs.length) return from;
+  const cur = hrs.indexOf(Number(from));
+  if (cur < 0) return snapHour(from);
+  const next = hrs[cur + dir];
+  if (next === undefined) return dir > 0 ? hrs[0] : hrs[hrs.length - 1];
+  return next;
+}
+
+function renderTicks() {
+  if (!hourTicks) return;
+  const maxH = maxHour();
+  const cur = Number(hour.value);
+  const parts = [];
+  for (let i = 0; i <= maxH; i += 1) {
+    const cls = i === cur ? "current" : hourIsReady(i) ? "ready" : "";
+    parts.push(`<span class="${cls}" title="F${pad(i)}"></span>`);
+  }
+  hourTicks.innerHTML = parts.join("");
+}
+
+function formatUpdated(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const hh = pad(d.getUTCHours());
+  const mm = pad(d.getUTCMinutes());
+  const ss = pad(d.getUTCSeconds());
+  return `${hh}:${mm}:${ss} UTC`;
+}
+
+function renderStatus() {
+  if (!latest) return;
+  const st = latest.status || "";
+  const stage = latest.stage || "";
+  const label = latest.stage_label || "";
+  banner.classList.remove("ok", "bad", "run");
+  if (st === "failed" || stage === "failed") banner.classList.add("bad");
+  else if (st === "running") banner.classList.add("run");
+  else if (st === "complete" || st === "success") banner.classList.add("ok");
+
+  if (label) {
+    statusStage.textContent = label;
+  } else if (st === "placeholder") {
+    statusStage.textContent = `Placeholder overlays for ${latest.cycle} — waiting on the first WRF cycle.`;
+  } else if (st === "awaiting-first-run") {
+    statusStage.textContent = "No forecast published yet. The 12Z cycle lands after the daily WRF run.";
+  } else if (st === "complete" || st === "success") {
+    statusStage.textContent = `Complete · ${latest.cycle} (${latest.hours} h)`;
+  } else {
+    statusStage.textContent = `${st || "unknown"} · ${latest.cycle || "n/a"}`;
+  }
+
+  const bits = [];
+  if (latest.cycle) bits.push(latest.cycle);
+  const when = formatUpdated(latest.updated_at || latest.completed_at);
+  if (when) bits.push(`updated ${when}`);
+  statusMeta.textContent = bits.join(" · ");
+
+  const total = maxHour();
+  const done = Number.isFinite(Number(latest.wrf_hour_done))
+    ? Number(latest.wrf_hour_done)
+    : (availableHours().length ? Math.max(...availableHours()) : 0);
+  const readyN = availableHours().length;
+  statusBarWrap.hidden = false;
+  statusBar.style.width = `${Math.max(0, Math.min(100, total ? (done / total) * 100 : 0))}%`;
+  statusBarLabel.textContent = readyN
+    ? `F${pad(done)} / ${total} · ${readyN} frame${readyN === 1 ? "" : "s"}`
+    : `0 / ${total} h`;
 }
 
 function renderLegend(id) {
@@ -241,10 +359,14 @@ function preload(prod, fxx) {
 }
 
 function render() {
-  const fxx = Number(hour.value);
-  hour.max = String((latest && (latest.hours ?? latest.frames - 1)) || 18);
+  const maxH = maxHour();
+  hour.max = String(maxH);
+  const fxx = snapHour(Number(hour.value));
+  if (String(hour.value) !== String(fxx)) hour.value = String(fxx);
   hourLabel.textContent = `F${pad(fxx)}`;
   validLabel.textContent = latest ? mstFromFxx(latest.cycle, fxx) : "";
+  hour.classList.toggle("partial", availableHours().length > 0 && availableHours().length <= maxH);
+  renderTicks();
 
   meteoPanel.hidden = !meteoOpen;
   if (meteoOpen) {
@@ -256,6 +378,14 @@ function render() {
   }
 
   renderLegend(product);
+  if (!hourIsReady(fxx)) {
+    frameError.hidden = false;
+    if (overlay) {
+      map.removeLayer(overlay);
+      overlay = null;
+    }
+    return;
+  }
   const url = frameUrl(product, fxx);
   if (!url) return;
   if (overlay && overlay._url === url) {
@@ -263,8 +393,9 @@ function render() {
     return;
   }
   setOverlayUrl(url);
-  const maxH = Number(hour.max);
-  preload(product, fxx >= maxH ? 0 : fxx + 1);
+  const hrs = availableHours();
+  const idx = hrs.indexOf(fxx);
+  if (idx >= 0 && idx < hrs.length - 1) preload(product, hrs[idx + 1]);
 }
 
 PRODUCTS.forEach((p, i) => {
@@ -299,13 +430,16 @@ document.getElementById("meteo-close").addEventListener("click", () => {
   });
 });
 
-hour.addEventListener("input", render);
+hour.addEventListener("input", () => {
+  hour.value = String(snapHour(Number(hour.value)));
+  render();
+});
 document.getElementById("prev").addEventListener("click", () => {
-  hour.value = String(Math.max(0, Number(hour.value) - 1));
+  hour.value = String(neighborHour(hour.value, -1));
   render();
 });
 document.getElementById("next").addEventListener("click", () => {
-  hour.value = String(Math.min(Number(hour.max), Number(hour.value) + 1));
+  hour.value = String(neighborHour(hour.value, 1));
   render();
 });
 playBtn.addEventListener("click", () => {
@@ -316,11 +450,11 @@ playBtn.addEventListener("click", () => {
     playBtn.classList.remove("active");
     return;
   }
+  if (!availableHours().length) return;
   playBtn.textContent = "Pause";
   playBtn.classList.add("active");
   playing = setInterval(() => {
-    const next = Number(hour.value) + 1;
-    hour.value = String(next > Number(hour.max) ? 0 : next);
+    hour.value = String(neighborHour(hour.value, 1));
     render();
   }, 650);
 });
@@ -334,10 +468,10 @@ opacityInput.addEventListener("input", () => {
 document.addEventListener("keydown", (ev) => {
   if (ev.target && ["INPUT", "TEXTAREA"].includes(ev.target.tagName)) return;
   if (ev.key === "ArrowLeft") {
-    hour.value = String(Math.max(0, Number(hour.value) - 1));
+    hour.value = String(neighborHour(hour.value, -1));
     render();
   } else if (ev.key === "ArrowRight") {
-    hour.value = String(Math.min(Number(hour.max), Number(hour.value) + 1));
+    hour.value = String(neighborHour(hour.value, 1));
     render();
   } else if (ev.key === " ") {
     ev.preventDefault();
@@ -347,29 +481,38 @@ document.addEventListener("keydown", (ev) => {
 
 renderLegend("refl");
 
-fetch(`${BUCKET}/latest.json?t=${Date.now()}`)
-  .then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  })
-  .then((j) => {
-    latest = j;
-    if (j.bounds) applyBounds(j.bounds);
-    if (j.status === "success") {
-      banner.classList.add("ok");
-      banner.textContent = `Last successful run: ${j.cycle} (${j.hours} h) · ${j.completed_at || ""}`;
-    } else if (j.status === "awaiting-first-run") {
-      banner.textContent =
-        "No forecast published yet. The 12Z cycle lands after the daily WRF run.";
-    } else if (j.status === "placeholder") {
-      banner.textContent = `Placeholder overlays for ${j.cycle} — waiting on the first WRF cycle.`;
-    } else {
-      banner.classList.add("bad");
-      banner.textContent = `Latest: ${j.status} (${j.cycle || "n/a"})`;
-    }
-    render();
-  })
-  .catch(() => {
-    banner.classList.add("bad");
-    banner.textContent = "Could not load latest.json from S3. Check the bucket CORS policy.";
-  });
+function boundsChanged(next) {
+  return JSON.stringify(next) !== JSON.stringify(bounds);
+}
+
+function applyLatest(j, { fit = false } = {}) {
+  const cycleChanged = !latest || latest.cycle !== j.cycle;
+  latest = j;
+  if (j.bounds && (cycleChanged || boundsChanged(j.bounds))) {
+    applyBounds(j.bounds, { fit: fit || cycleChanged });
+  }
+  renderStatus();
+  if (cycleChanged) hour.value = String(availableHours()[0] ?? 0);
+  else hour.value = String(snapHour(Number(hour.value)));
+  render();
+}
+
+function loadLatest({ fit = false } = {}) {
+  return fetch(`${BUCKET}/latest.json?t=${Date.now()}`, { cache: "no-store" })
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then((j) => applyLatest(j, { fit }));
+}
+
+loadLatest({ fit: true }).catch(() => {
+  banner.classList.add("bad");
+  statusStage.textContent = "Could not load latest.json from S3. Check the bucket CORS policy.";
+});
+setInterval(() => {
+  loadLatest().catch(() => {});
+}, POLL_MS);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) loadLatest().catch(() => {});
+});

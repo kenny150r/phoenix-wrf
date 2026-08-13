@@ -28,6 +28,8 @@ export JASPERINC="$ROOT/opt/grib2/include"
 export WRF_DIR="$ROOT/src/WRF"
 
 export OPAL_PREFIX="$PREFIX/usr"
+export PMIX_INSTALL_PREFIX="$PREFIX/usr"
+export PMIX_PREFIX="$PREFIX/usr"
 export OMPI_FC=gfortran
 export OMPI_CC=gcc
 export OMPI_MCA_btl=vader,self,tcp

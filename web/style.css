@@ -110,6 +110,84 @@ h1 {
 }
 .banner.ok { border-color: var(--ok); }
 .banner.bad { border-color: var(--bad); }
+.banner.run { border-color: var(--copper); }
+.status-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-top: 0.28rem;
+  flex-shrink: 0;
+  background: var(--muted);
+}
+.banner.run .status-dot {
+  background: var(--copper);
+  box-shadow: 0 0 0 0 rgba(196, 120, 74, 0.55);
+  animation: status-pulse 1.6s ease-out infinite;
+}
+.banner.ok .status-dot { background: var(--ok); }
+.banner.bad .status-dot { background: var(--bad); }
+@keyframes status-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(196, 120, 74, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(196, 120, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(196, 120, 74, 0); }
+}
+#status-stage { font-weight: 500; }
+.status-meta {
+  margin-top: 0.28rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.status-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+.status-progress-wrap[hidden] { display: none; }
+.status-progress-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(232, 224, 212, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+#status-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--copper);
+  transition: width 0.3s ease;
+}
+.banner.ok #status-progress-bar { background: var(--ok); }
+.banner.bad #status-progress-bar { background: var(--bad); }
+#status-progress-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.hour-ticks {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 2.6rem 0.2rem;
+  pointer-events: none;
+}
+.hour-ticks span {
+  width: 3px;
+  height: 7px;
+  border-radius: 1px;
+  background: rgba(154, 143, 130, 0.22);
+}
+.hour-ticks span.ready { background: var(--copper); opacity: 0.9; }
+.hour-ticks span.current { background: var(--text); height: 9px; }
+.slider-row input[type="range"].partial {
+  opacity: 0.95;
+}
 
 .products {
   display: flex;

@@ -36,8 +36,9 @@ Python post-processing uses conda env `wrf-post` (`herbie-data`, `wrf-python`, `
 Static GitHub Pages app in `web/`: a full-viewport Leaflet map with floating product/time/legend controls. Forecast fields are transparent georeferenced PNG overlays (`L.imageOverlay`) placed with `bounds` from `latest.json`. The KPHX meteogram is a chart panel, not a spatial overlay. Frames are loaded from S3, not stored in the repo.
 
 - Site: https://kenny150r.github.io/phoenix-wrf/
-- Bucket: `s3://phx-wrf-forecast` (`us-east-1`), public `GetObject`, CORS for `https://kenny150r.github.io`, lifecycle expire `runs/` after 14 days
+- Bucket: `s3://phx-wrf-forecast` (`us-east-1`), public `GetObject` on `latest.json` + `runs/*`, CORS for `https://kenny150r.github.io`, lifecycle expire `runs/` after 14 days
 - Object layout: `s3://phx-wrf-forecast/runs/YYYYMMDDTHHz/{refl,precip,t2,wind,cape,meteogram}/fXX.png` plus `s3://phx-wrf-forecast/latest.json`
+- Live status: `latest.json` is polled every 20s (`status`, `stage`, `stage_label`, `wrf_hour_done`, `hours_available`, `updated_at`). During `wrf.exe` a watcher plots each `wrfout` (`frames_per_outfile=1`) and uploads that hour’s PNGs so the slider can enable hours as they appear.
 
 ```bash
 export AWS_EC2_METADATA_DISABLED=true   # this desktop is not EC2

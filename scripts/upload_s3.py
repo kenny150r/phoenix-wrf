@@ -8,30 +8,57 @@ Layout:
 from __future__ import annotations
 
 import argparse
-import json
 import os
-from datetime import datetime, timezone
+import re
+import sys
 from pathlib import Path
 
-# This desktop is not EC2; IMDS probes stall boto3/aws for ~20s otherwise.
 os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
 
 import boto3
 
-BUCKET = "phx-wrf-forecast"
-PRODUCTS = ["refl", "precip", "t2", "wind", "cape", "meteogram"]
+SCRIPTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS))
+
+from publish_status import BUCKET, PRODUCTS, build_latest, upload_latest
+
+PNG_HOUR = re.compile(r"^f(\d+)\.png$", re.I)
 
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--run-dir", required=True, help="Local plots/<cycle> directory")
-    p.add_argument("--cycle", required=True)
-    p.add_argument("--hours", type=int, default=18)
-    p.add_argument("--status", default="success")
-    p.add_argument("--bucket", default=BUCKET)
-    args = p.parse_args()
+def parse_hours_arg(text: str | None) -> list[int] | None:
+    if text is None:
+        return None
+    text = text.strip()
+    if not text:
+        return []
+    return sorted({int(p.strip()) for p in text.split(",") if p.strip()})
 
-    run_dir = Path(args.run_dir)
+
+def should_upload(rel: Path, only_hours: list[int] | None) -> bool:
+    if only_hours is None:
+        return True
+    if rel.name == "meta.json":
+        return True
+    if rel.parts and rel.parts[0] == "meteogram":
+        return True
+    m = PNG_HOUR.match(rel.name)
+    if m and int(m.group(1)) in only_hours:
+        return True
+    return False
+
+
+def upload_run(
+    run_dir: Path,
+    cycle: str,
+    hours: int,
+    *,
+    only_hours: list[int] | None = None,
+    status: str = "complete",
+    stage: str | None = None,
+    stage_label: str | None = None,
+    bucket: str = BUCKET,
+) -> int:
+    run_dir = Path(run_dir)
     s3 = boto3.client("s3", region_name="us-east-1")
     uploaded = 0
     for path in sorted(run_dir.rglob("*")):
@@ -41,55 +68,68 @@ def main():
             continue
         if path.suffix.lower() not in {".png", ".json"}:
             continue
-        key = f"runs/{args.cycle}/{path.relative_to(run_dir).as_posix()}"
+        rel = path.relative_to(run_dir)
+        if not should_upload(rel, only_hours):
+            continue
+        key = f"runs/{cycle}/{rel.as_posix()}"
         ctype = "image/png" if path.suffix.lower() == ".png" else "application/json"
-        extra = {"ContentType": ctype, "CacheControl": "public, max-age=300"}
-        s3.upload_file(str(path), args.bucket, key, ExtraArgs=extra)
+        cache = "public, max-age=60" if rel.parts and rel.parts[0] == "meteogram" else "public, max-age=300"
+        s3.upload_file(str(path), bucket, key, ExtraArgs={"ContentType": ctype, "CacheControl": cache})
         uploaded += 1
-        print(f"put s3://{args.bucket}/{key}")
+        print(f"put s3://{bucket}/{key}")
 
-    meta = {}
-    meta_path = run_dir / "meta.json"
-    if meta_path.exists():
-        try:
-            meta = json.loads(meta_path.read_text())
-        except json.JSONDecodeError:
-            meta = {}
+    if stage is None:
+        stage = "complete" if status in {"complete", "success", "placeholder"} else status
+    if stage_label is None:
+        stage_label = {
+            "complete": f"Complete · {cycle}",
+            "placeholder": f"Placeholder overlays · {cycle}",
+            "failed": f"Failed · {cycle}",
+            "running": f"Running · {cycle}",
+        }.get(status if status != "success" else "complete", stage)
 
-    # Leaflet L.imageOverlay bounds: [[south, west], [north, east]]
-    # 201×201 Lambert mass-grid AABB (same as plot_products.domain_bounds_from_center).
-    default_bounds = [[32.55050, -113.15377], [34.34493, -110.98623]]
-    bounds = meta.get("bounds") or default_bounds
+    latest = build_latest(
+        cycle=cycle,
+        status=status,
+        stage=stage,
+        stage_label=stage_label,
+        hours=hours,
+        run_dir=run_dir,
+        hours_available=only_hours if only_hours is not None and status == "running" else None,
+        bucket=bucket,
+    )
+    # When uploading a subset while running, merge with PNGs already on disk.
+    if status == "running":
+        from publish_status import scan_hours_available
 
-    latest = {
-        "cycle": args.cycle,
-        "status": args.status,
-        "hours": args.hours,
-        "products": PRODUCTS,
-        "bucket": args.bucket,
-        "base_url": f"https://{args.bucket}.s3.amazonaws.com/runs/{args.cycle}",
-        "meteogram_url": f"https://{args.bucket}.s3.amazonaws.com/runs/{args.cycle}/meteogram/f00.png",
-        "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "frames": args.hours + 1,
-        "bounds": bounds,
-        "center": meta.get("center") or [33.45, -112.07],
-        "ref_lat": meta.get("ref_lat", 33.45),
-        "ref_lon": meta.get("ref_lon", -112.07),
-        "domain_km": meta.get("domain_km", 200),
-    }
-    latest_path = run_dir / "latest.json"
-    latest_path.write_text(json.dumps(latest, indent=2) + "\n")
-    for key, cache in (
-        ("latest.json", "public, max-age=60"),
-        (f"runs/{args.cycle}/latest.json", "public, max-age=300"),
-    ):
-        s3.upload_file(
-            str(latest_path),
-            args.bucket,
-            key,
-            ExtraArgs={"ContentType": "application/json", "CacheControl": cache},
-        )
+        latest["hours_available"] = scan_hours_available(run_dir)
+        latest["wrf_hour_done"] = max(latest["hours_available"]) if latest["hours_available"] else 0
+    upload_latest(latest, bucket=bucket, run_dir=run_dir)
     print(f"Uploaded {uploaded} objects; latest.json written")
+    return uploaded
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--run-dir", required=True, help="Local plots/<cycle> directory")
+    p.add_argument("--cycle", required=True)
+    p.add_argument("--hours", type=int, default=18)
+    p.add_argument("--status", default="complete")
+    p.add_argument("--stage", default=None)
+    p.add_argument("--stage-label", default=None)
+    p.add_argument("--only-hours", default=None, help="Comma-separated fXX hours to upload")
+    p.add_argument("--bucket", default=BUCKET)
+    args = p.parse_args()
+    upload_run(
+        Path(args.run_dir),
+        args.cycle,
+        args.hours,
+        only_hours=parse_hours_arg(args.only_hours),
+        status=args.status,
+        stage=args.stage,
+        stage_label=args.stage_label,
+        bucket=args.bucket,
+    )
 
 
 if __name__ == "__main__":

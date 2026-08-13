@@ -18,7 +18,17 @@
   <aside class="panel panel-tl" id="brand-panel">
     <h1>Phoenix 1 km WRF</h1>
     <p class="sub">18-hour monsoon forecast · 12Z HRRR · Thompson / MYNN / RRTMG</p>
-    <div id="banner" class="banner" role="status">Loading latest run…</div>
+    <div id="banner" class="banner" role="status">
+      <div class="status-row">
+        <span id="status-dot" class="status-dot" aria-hidden="true"></span>
+        <span id="status-stage">Loading latest run…</span>
+      </div>
+      <div id="status-meta" class="status-meta"></div>
+      <div class="status-progress-wrap" id="status-progress-wrap" hidden>
+        <div class="status-progress-track"><div id="status-progress-bar"></div></div>
+        <span id="status-progress-label"></span>
+      </div>
+    </div>
     <nav id="products" class="products" aria-label="Forecast products"></nav>
   </aside>
 
@@ -36,6 +46,7 @@
       <span id="hour-label">F00</span>
       <span id="valid-label"></span>
     </div>
+    <div class="hour-ticks" id="hour-ticks" aria-hidden="true"></div>
     <div class="slider-row" id="slider-row">
       <button id="prev" type="button" aria-label="Previous hour">◀</button>
       <input id="hour" type="range" min="0" max="18" value="0" />
