@@ -1,6 +1,7 @@
 #!/bin/bash
 # Create public S3 bucket phx-wrf-forecast in us-east-1 with CORS + 14-day lifecycle.
 set -euo pipefail
+export AWS_EC2_METADATA_DISABLED=true
 BUCKET=phx-wrf-forecast
 REGION=us-east-1
 

@@ -1,3 +1,4 @@
+# Same Actions Pages deploy as kenny150r/bayreeze, but the artifact is static web/.
 name: Deploy to GitHub Pages
 
 on:

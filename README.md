@@ -31,6 +31,25 @@ bash scripts/install_systemd.sh
 
 Python post-processing uses conda env `wrf-post` (`herbie-data`, `wrf-python`, `cartopy`, `boto3`).
 
+## Viewer and S3
+
+Static GitHub Pages app in `web/` (time slider, product tabs, last-successful-run banner from `latest.json`). Frames are loaded from S3, not stored in the repo.
+
+- Site: https://kenny150r.github.io/phoenix-wrf/
+- Bucket: `s3://phx-wrf-forecast` (`us-east-1`), public `GetObject`, CORS for `https://kenny150r.github.io`, lifecycle expire `runs/` after 14 days
+- Object layout: `s3://phx-wrf-forecast/runs/YYYYMMDDTHHz/{refl,precip,t2,wind,cape,meteogram}/fXX.png` plus `s3://phx-wrf-forecast/latest.json`
+
+```bash
+export AWS_EC2_METADATA_DISABLED=true   # this desktop is not EC2
+bash scripts/setup_s3.sh
+# After a WRF cycle (conda env wrf-post):
+python scripts/plot_products.py --wrfout-dir data/wrfout/CYCLE --out-dir plots/CYCLE --cycle CYCLE
+python scripts/upload_s3.py --run-dir plots/CYCLE --cycle CYCLE --hours 18
+# Before WRF exists, labeled placeholders:
+python3 scripts/plot_products.py --placeholder --out-dir plots/CYCLE --cycle CYCLE --hours 18
+python3 scripts/upload_s3.py --run-dir plots/CYCLE --cycle CYCLE --hours 18 --status placeholder
+```
+
 ## Notes
 
 Passwordless sudo is not available on this host, so gfortran/OpenMPI/netCDF-Fortran were extracted from Ubuntu debs into `opt/prefix` instead of `apt install`. Preferred packages if sudo is enabled later:

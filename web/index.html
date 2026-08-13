@@ -12,18 +12,21 @@
       <h1>Phoenix 1 km WRF</h1>
       <p class="sub">Daily 18-hour forecast from 12Z HRRR · Thompson / MYNN / RRTMG</p>
     </div>
-    <div id="banner" class="banner">Loading latest run…</div>
+    <div id="banner" class="banner" role="status">Loading latest run…</div>
   </header>
-  <nav id="tabs"></nav>
+  <nav id="tabs" aria-label="Forecast products"></nav>
   <section id="viewer">
-    <img id="frame" alt="Forecast frame" />
+    <div id="stage">
+      <img id="frame" alt="Forecast frame" />
+      <div id="frame-error" hidden>No frame for this hour yet.</div>
+    </div>
     <div id="caption"></div>
-    <div class="slider-row">
+    <div class="slider-row" id="slider-row">
       <button id="prev" type="button" aria-label="Previous hour">◀</button>
       <input id="hour" type="range" min="0" max="18" value="0" />
       <button id="next" type="button" aria-label="Next hour">▶</button>
       <button id="play" type="button">Play</button>
-      <span id="hour-label">F00 · 12Z</span>
+      <span id="hour-label">F00</span>
     </div>
   </section>
   <footer>
