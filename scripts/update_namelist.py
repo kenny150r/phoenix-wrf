@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Patch namelist.wps / namelist.input dates and metgrid dimensions (stdlib only)."""
+from __future__ import annotations
+
+import argparse
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+
+
+def set_wps(path: Path, start: datetime, end: datetime):
+    text = path.read_text()
+    s = start.strftime("%Y-%m-%d_%H:%M:%S")
+    e = end.strftime("%Y-%m-%d_%H:%M:%S")
+    text = re.sub(
+        r"start_date\s*=\s*'[^']*'(,'[^']*')?",
+        f" start_date = '{s}','{s}',",
+        text,
+        count=1,
+    )
+    text = re.sub(
+        r"end_date\s*=\s*'[^']*'(,'[^']*')?",
+        f" end_date   = '{e}','{e}',",
+        text,
+        count=1,
+    )
+    path.write_text(text)
+
+
+def set_input(path: Path, start: datetime, end: datetime, hours: int, nmet: int | None, nsoil: int | None):
+    text = path.read_text()
+    text = re.sub(r"run_hours\s*=\s*\d+", f" run_hours                           = {hours}", text, count=1)
+
+    def block(prefix: str, dt: datetime):
+        nonlocal text
+        text = re.sub(rf"{prefix}_year\s*=.*", f" {prefix}_year                          = {dt.year:04d}, {dt.year:04d},", text, count=1)
+        text = re.sub(rf"{prefix}_month\s*=.*", f" {prefix}_month                         = {dt.month:02d},   {dt.month:02d},", text, count=1)
+        text = re.sub(rf"{prefix}_day\s*=.*", f" {prefix}_day                           = {dt.day:02d},   {dt.day:02d},", text, count=1)
+        text = re.sub(rf"{prefix}_hour\s*=.*", f" {prefix}_hour                          = {dt.hour:02d},   {dt.hour:02d},", text, count=1)
+
+    block("start", start)
+    block("end", end)
+    if nmet is not None:
+        text = re.sub(
+            r"num_metgrid_levels\s*=\s*\d+",
+            f" num_metgrid_levels                  = {nmet}",
+            text,
+            count=1,
+        )
+    if nsoil is not None:
+        text = re.sub(
+            r"num_metgrid_soil_levels\s*=\s*\d+",
+            f" num_metgrid_soil_levels             = {nsoil}",
+            text,
+            count=1,
+        )
+    path.write_text(text)
+
+
+def dim_from_ncdump(ncdump_out: str, name: str) -> int | None:
+    m = re.search(rf"{name}\s*=\s*(\d+)", ncdump_out)
+    return int(m.group(1)) if m else None
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--wps", type=Path)
+    p.add_argument("--input", type=Path)
+    p.add_argument("--date", required=True, help="YYYYMMDD cycle date")
+    p.add_argument("--hours", type=int, default=18)
+    p.add_argument("--nmet", type=int)
+    p.add_argument("--nsoil", type=int)
+    args = p.parse_args()
+    start = datetime.strptime(args.date + "12", "%Y%m%d%H")
+    end = start + timedelta(hours=args.hours)
+    if args.wps:
+        set_wps(args.wps, start, end)
+    if args.input:
+        set_input(args.input, start, end, args.hours, args.nmet, args.nsoil)
+
+
+if __name__ == "__main__":
+    main()

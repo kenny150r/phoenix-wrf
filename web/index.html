@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Phoenix 1 km WRF — monsoon forecast</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Phoenix 1 km WRF</h1>
+      <p class="sub">Daily 18-hour forecast from 12Z HRRR · Thompson / MYNN / RRTMG</p>
+    </div>
+    <div id="banner" class="banner">Loading latest run…</div>
+  </header>
+  <nav id="tabs"></nav>
+  <section id="viewer">
+    <img id="frame" alt="Forecast frame" />
+    <div id="caption"></div>
+    <div class="slider-row">
+      <button id="prev" type="button" aria-label="Previous hour">◀</button>
+      <input id="hour" type="range" min="0" max="18" value="0" />
+      <button id="next" type="button" aria-label="Next hour">▶</button>
+      <button id="play" type="button">Play</button>
+      <span id="hour-label">F00 · 12Z</span>
+    </div>
+  </section>
+  <footer>
+    Frames on S3 (<code>phx-wrf-forecast</code>, 14-day retention). Model output stays on the forecast machine.
+    Source: <a href="https://github.com/kenny150r/phoenix-wrf">kenny150r/phoenix-wrf</a>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+[Unit]
+Description=Phoenix 1 km WRF 12Z forecast
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/kenny/phoenix-wrf
+Environment=HOME=/home/kenny
+Environment=PATH=/home/kenny/phoenix-wrf/opt/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/kenny/phoenix-wrf/scripts/run_forecast.sh
+Nice=5
+TimeoutStartSec=12h
+StandardOutput=append:/home/kenny/phoenix-wrf/data/logs/systemd.log
+StandardError=append:/home/kenny/phoenix-wrf/data/logs/systemd.log
+
+[Install]
+WantedBy=default.target

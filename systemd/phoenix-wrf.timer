@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Phoenix WRF 12Z cycle (14:20 UTC / 07:20 MST)
+
+[Timer]
+OnCalendar=*-*-* 14:20:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=phoenix-wrf.service
+
+[Install]
+WantedBy=timers.target
