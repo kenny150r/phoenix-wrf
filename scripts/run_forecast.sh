@@ -65,14 +65,14 @@ if head -1 "$LINK" | grep -q '/bin/csh'; then
   sed -i "1s|^#!.*csh.*|#!$ROOT/opt/bin/csh -f|" "$LINK"
 fi
 
-if [[ ! -f $ROOT/data/wps/geo_em_d01.nc ]]; then
+if [[ ! -f $ROOT/data/wps/geo_em.d01.nc ]]; then
   echo "=== geogrid ==="
   ./geogrid.exe
   mkdir -p "$ROOT/data/wps"
-  cp -f geo_em_d01.nc "$ROOT/data/wps/geo_em_d01.nc"
+  cp -f geo_em.d01.nc "$ROOT/data/wps/geo_em.d01.nc"
 else
-  ln -sfn "$ROOT/data/wps/geo_em_d01.nc" geo_em_d01.nc
-  echo "reusing geo_em_d01.nc"
+  ln -sfn "$ROOT/data/wps/geo_em.d01.nc" geo_em.d01.nc
+  echo "reusing geo_em.d01.nc"
 fi
 
 GRIB="$ROOT/data/grib/$DATE"
@@ -93,12 +93,9 @@ sed -i "s/^ prefix.*/ prefix = 'FILE',/" namelist.wps
 ./metgrid.exe
 
 MET=$(ls -1 met_em.d01.* | head -1)
-NCDUMP_OUT=$("$ROOT/opt/bin/ncdump" -h "$MET")
-NMET=$(echo "$NCDUMP_OUT" | sed -n 's/.*num_metgrid_levels *= *\([0-9]*\).*/\1/p' | head -1)
-NSOIL=$(echo "$NCDUMP_OUT" | sed -n 's/.*num_st_layers *= *\([0-9]*\).*/\1/p' | head -1)
-if [[ -z ${NSOIL:-} ]]; then
-  NSOIL=$(echo "$NCDUMP_OUT" | sed -n 's/.*num_sm_layers *= *\([0-9]*\).*/\1/p' | head -1)
-fi
+NCDUMP_OUT=$("$ROOT/opt/bin/ncdump" -h "$MET" 2>/dev/null || true)
+NMET=$(echo "$NCDUMP_OUT" | grep -oE 'num_metgrid_levels *= *[0-9]+' | grep -oE '[0-9]+' | head -1)
+NSOIL=$(echo "$NCDUMP_OUT" | grep -oE 'num_st_layers *= *[0-9]+|num_sm_layers *= *[0-9]+|num_metgrid_soil_levels *= *[0-9]+' | grep -oE '[0-9]+' | head -1)
 echo "num_metgrid_levels=$NMET num_soil=$NSOIL"
 
 # --- WRF workspace ---

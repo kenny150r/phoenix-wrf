@@ -57,7 +57,8 @@ def main():
             meta = {}
 
     # Leaflet L.imageOverlay bounds: [[south, west], [north, east]]
-    default_bounds = [[32.10253, -113.68496], [34.79747, -110.45504]]
+    # 201×201 Lambert mass-grid AABB (same as plot_products.domain_bounds_from_center).
+    default_bounds = [[32.55050, -113.15377], [34.34493, -110.98623]]
     bounds = meta.get("bounds") or default_bounds
 
     latest = {
@@ -74,7 +75,7 @@ def main():
         "center": meta.get("center") or [33.45, -112.07],
         "ref_lat": meta.get("ref_lat", 33.45),
         "ref_lon": meta.get("ref_lon", -112.07),
-        "domain_km": meta.get("domain_km", 300),
+        "domain_km": meta.get("domain_km", 200),
     }
     latest_path = run_dir / "latest.json"
     latest_path.write_text(json.dumps(latest, indent=2) + "\n")

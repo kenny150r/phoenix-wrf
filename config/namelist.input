@@ -36,8 +36,8 @@
  time_step_fract_num                 = 0,
  time_step_fract_den                 = 1,
  max_dom                             = 1,
- e_we                                = 301,
- e_sn                                = 301,
+ e_we                                = 201,
+ e_sn                                = 201,
  e_vert                              = 45,
  p_top_requested                     = 5000,
  num_metgrid_levels                  = 41,
@@ -59,7 +59,6 @@
  zap_close_levels                    = 500,
  lowest_lev_from_sfc                 = .false.,
  use_surface                         = .true.,
- use_lsm                             = .true.,
  lagrange_order                      = 2,
 /
 

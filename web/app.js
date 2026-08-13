@@ -1,8 +1,8 @@
 const BUCKET = "https://phx-wrf-forecast.s3.amazonaws.com";
-/** Fallback 300 km box at 33.45N / 112.07W (km-per-degree lon scaled). */
+/** Fallback 200 km Lambert mass-grid AABB at 33.45N / 112.07W (e_we=e_sn=201, dx=1 km). */
 const DEFAULT_BOUNDS = [
-  [32.10253, -113.68496],
-  [34.79747, -110.45504],
+  [32.55050, -113.15377],
+  [34.34493, -110.98623],
 ];
 const DEFAULT_CENTER = [33.45, -112.07];
 const KPHX = [33.4342, -112.0116];

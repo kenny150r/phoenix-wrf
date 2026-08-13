@@ -3,7 +3,7 @@
 Daily 18-hour WRF run over Phoenix on this machine, initialized from the **12Z HRRR**. Maps and a KPHX meteogram are published to GitHub Pages; PNG frames live on S3 for 14 days. `wrfout` stays local for 48 hours.
 
 - Viewer: https://kenny150r.github.io/phoenix-wrf/ (full-page Leaflet map, forecast fields as georeferenced overlays)
-- Domain: 301×301 at 1 km, `ref_lat=33.45`, `ref_lon=-112.07`
+- Domain: 201×201 at 1 km (~200 km), `ref_lat=33.45`, `ref_lon=-112.07`, Lambert
 - Physics: Thompson MP, MYNN PBL, RRTMG, no cumulus, `time_step=6`, 4 MPI ranks
 - Cycle: systemd timer at **14:20 UTC** (07:20 MST)
 

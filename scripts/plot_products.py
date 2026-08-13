@@ -23,10 +23,18 @@ from pathlib import Path
 import numpy as np
 
 KPHX = (33.4342, -112.0116)
+# config/namelist.wps — Lambert tangent at domain center.
 REF_LAT = 33.45
 REF_LON = -112.07
-# namelist: e_we = e_sn = 301, dx = dy = 1000 m → 300 km square (Lambert).
-DOMAIN_KM = 300.0
+TRUELAT1 = 33.45
+TRUELAT2 = 33.45
+STAND_LON = -112.07
+E_WE = 201
+E_SN = 201
+DX_M = 1000.0
+# WPS constants_module spherical radius (module_map_utils.F).
+EARTH_RADIUS_M = 6370000.0
+DOMAIN_KM = (E_WE - 1) * DX_M / 1000.0  # 200 km for e_we=201, dx=1000
 KM_PER_DEG_LAT = 111.32
 
 # Keep these hex lists in lockstep with web/app.js LEGENDS.
@@ -123,19 +131,77 @@ def km_per_deg_lon(lat: float = REF_LAT) -> float:
     return KM_PER_DEG_LAT * math.cos(math.radians(lat))
 
 
+def _wrf_lc_ij_to_ll(i, j):
+    """WRF/WPS Lambert conformal (i,j) → lat/lon. Mass-grid i=1..e_we-1.
+
+    Matches WPS v4.6 geogrid module_map_utils (set_lc / ijll_lc). knowni/j
+    default to the domain center (e_we/2, e_sn/2), same as namelist ref_lat/lon.
+    """
+    i = np.asarray(i, dtype=float)
+    j = np.asarray(j, dtype=float)
+    hemi = 1.0 if TRUELAT1 >= 0.0 else -1.0
+    rad = math.pi / 180.0
+    deg = 180.0 / math.pi
+    if abs(TRUELAT1 - TRUELAT2) > 0.1:
+        cone = math.log10(math.cos(TRUELAT1 * rad)) - math.log10(math.cos(TRUELAT2 * rad))
+        cone /= math.log10(math.tan((45.0 - abs(TRUELAT1) / 2.0) * rad)) - math.log10(
+            math.tan((45.0 - abs(TRUELAT2) / 2.0) * rad)
+        )
+    else:
+        cone = math.sin(abs(TRUELAT1) * rad)
+    knowni = E_WE / 2.0
+    knownj = E_SN / 2.0
+    rebydx = EARTH_RADIUS_M / DX_M
+    deltalon1 = REF_LON - STAND_LON
+    if deltalon1 > 180.0:
+        deltalon1 -= 360.0
+    if deltalon1 < -180.0:
+        deltalon1 += 360.0
+    ctl1r = math.cos(TRUELAT1 * rad)
+    rsw = (
+        rebydx
+        * ctl1r
+        / cone
+        * (
+            math.tan((90.0 * hemi - REF_LAT) * rad / 2.0)
+            / math.tan((90.0 * hemi - TRUELAT1) * rad / 2.0)
+        )
+        ** cone
+    )
+    arg = cone * (deltalon1 * rad)
+    polei = hemi * knowni - hemi * rsw * math.sin(arg)
+    polej = hemi * knownj + rsw * math.cos(arg)
+    chi1 = (90.0 - hemi * TRUELAT1) * rad
+    chi2 = (90.0 - hemi * TRUELAT2) * rad
+    xx = hemi * i - polei
+    yy = polej - hemi * j
+    r2 = xx * xx + yy * yy
+    r = np.sqrt(r2) / rebydx
+    lon = STAND_LON + deg * np.arctan2(hemi * xx, yy) / cone
+    lon = np.mod(lon + 360.0, 360.0)
+    if chi1 == chi2:
+        chi = 2.0 * np.arctan((r / math.tan(chi1)) ** (1.0 / cone) * math.tan(chi1 * 0.5))
+    else:
+        chi = 2.0 * np.arctan(
+            (r * cone / math.sin(chi1)) ** (1.0 / cone) * math.tan(chi1 * 0.5)
+        )
+    lat = (90.0 - chi * deg) * hemi
+    pole = r2 == 0.0
+    lat = np.where(pole, hemi * 90.0, lat)
+    lon = np.where(pole, STAND_LON, lon)
+    lon = np.where(lon > 180.0, lon - 360.0, lon)
+    lon = np.where(lon < -180.0, lon + 360.0, lon)
+    return lat, lon
+
+
 def domain_bounds_from_center() -> list[list[float]]:
-    """Axis-aligned lat/lon box for the 300 km domain (lon scaled at ref_lat)."""
-    half = DOMAIN_KM / 2.0
-    dlat = half / KM_PER_DEG_LAT
-    dlon = half / km_per_deg_lon()
-    south = REF_LAT - dlat
-    north = REF_LAT + dlat
-    west = REF_LON - dlon
-    east = REF_LON + dlon
-    return [
-        [round(south, 5), round(west, 5)],
-        [round(north, 5), round(east, 5)],
-    ]
+    """Axis-aligned lat/lon box of the Lambert mass grid (wrfout XLAT/XLONG)."""
+    ii, jj = np.meshgrid(
+        np.arange(1, E_WE, dtype=float),
+        np.arange(1, E_SN, dtype=float),
+    )
+    lats, lons = _wrf_lc_ij_to_ll(ii, jj)
+    return domain_bounds_from_grid(lats, lons)
 
 
 def domain_bounds_from_grid(lats, lons) -> list[list[float]]:
@@ -297,7 +363,7 @@ def write_meta(out_root: Path, cycle: str, frames: int, bounds, **extra) -> dict
     return meta
 
 
-def _mesh(bounds: list[list[float]], n: int = 301):
+def _mesh(bounds: list[list[float]], n: int = E_WE):
     (south, west), (north, east) = bounds
     lats = np.linspace(south, north, n)
     lons = np.linspace(west, east, n)
