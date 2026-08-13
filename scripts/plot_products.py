@@ -1,32 +1,33 @@
 #!/usr/bin/env python3
-"""Plot WRF products to PNG frames for S3 / GitHub Pages.
+"""Plot WRF products as georeferenced transparent PNG overlays.
 
-Real wrfout frames need conda env wrf-post (wrf-python, cartopy, matplotlib).
-Placeholder frames work with ImageMagick `convert` so publishing can be
-tested before WRF is compiled:
+Real wrfout frames need conda env wrf-post (wrf-python, matplotlib).
+Placeholder frames are synthetic rasters (matplotlib only) so S3 / Pages
+can be tested before WRF is compiled:
 
     python3 scripts/plot_products.py --placeholder --out-dir plots/CYCLE --cycle YYYYMMDDT12z
+
+Overlays have no titles, axes, or colorbars — the Pages Leaflet map supplies
+the basemap and HTML legend. Bounds are written to meta.json as
+[[south, west], [north, east]] for latest.json / L.imageOverlay.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
+import math
 import shutil
-import subprocess
 from glob import glob
 from pathlib import Path
 
 import numpy as np
 
 KPHX = (33.4342, -112.0116)
-CITIES = {
-    "Phoenix": (33.45, -112.07),
-    "Tucson": (32.22, -110.97),
-    "Flagstaff": (35.20, -111.65),
-    "Yuma": (32.69, -114.63),
-    "Prescott": (34.54, -112.47),
-}
+REF_LAT = 33.45
+REF_LON = -112.07
+# namelist: e_we = e_sn = 301, dx = dy = 1000 m → 300 km square (Lambert).
+DOMAIN_KM = 300.0
+KM_PER_DEG_LAT = 111.32
 
 REFL_LEVELS = np.arange(0, 80, 5)
 REFL_COLORS = [
@@ -48,70 +49,133 @@ REFL_COLORS = [
 ]
 
 PRODUCTS = ["refl", "precip", "t2", "wind", "cape", "meteogram"]
-PLACEHOLDER_COLORS = {
-    "refl": ("#06243a", "#7fe0ff", "Simulated composite reflectivity"),
-    "precip": ("#06281f", "#9ee7c2", "1-hour / accumulated precip"),
-    "t2": ("#3a1c08", "#ffcc80", "2 m temperature"),
-    "wind": ("#2a2208", "#ffe082", "10 m wind + gusts"),
-    "cape": ("#2a0810", "#ff8a80", "Most-unstable CAPE"),
-    "meteogram": ("#121826", "#c5cae9", "KPHX meteogram (T, Td, wind, precip)"),
-}
+
+
+def km_per_deg_lon(lat: float = REF_LAT) -> float:
+    return KM_PER_DEG_LAT * math.cos(math.radians(lat))
+
+
+def domain_bounds_from_center() -> list[list[float]]:
+    """Axis-aligned lat/lon box for the 300 km domain (lon scaled at ref_lat)."""
+    half = DOMAIN_KM / 2.0
+    dlat = half / KM_PER_DEG_LAT
+    dlon = half / km_per_deg_lon()
+    south = REF_LAT - dlat
+    north = REF_LAT + dlat
+    west = REF_LON - dlon
+    east = REF_LON + dlon
+    return [
+        [round(south, 5), round(west, 5)],
+        [round(north, 5), round(east, 5)],
+    ]
+
+
+def domain_bounds_from_grid(lats, lons) -> list[list[float]]:
+    return [
+        [round(float(np.min(lats)), 5), round(float(np.min(lons)), 5)],
+        [round(float(np.max(lats)), 5), round(float(np.max(lons)), 5)],
+    ]
+
+
+def overlay_figsize(bounds: list[list[float]]) -> tuple[float, float]:
+    (south, west), (north, east) = bounds
+    lat_span = max(north - south, 1e-6)
+    lon_span = max(east - west, 1e-6)
+    height = 6.0
+    return (height * (lon_span / lat_span), height)
 
 
 def nws_refl_cmap():
     from matplotlib.colors import BoundaryNorm, ListedColormap
 
-    return ListedColormap(REFL_COLORS), BoundaryNorm(REFL_LEVELS, len(REFL_COLORS))
+    cmap = ListedColormap(REFL_COLORS)
+    cmap.set_bad((0, 0, 0, 0))
+    cmap.set_under((0, 0, 0, 0))
+    return cmap, BoundaryNorm(REFL_LEVELS, len(REFL_COLORS))
 
 
-def open_times(wrfout_dir: Path):
-    files = sorted(glob(str(wrfout_dir / "wrfout_d01_*")))
-    if not files:
-        raise SystemExit(f"No wrfout files in {wrfout_dir}")
-    return files
+def _transparent_cmap(cmap):
+    import matplotlib.pyplot as plt
+
+    if isinstance(cmap, str):
+        cmap = plt.get_cmap(cmap).copy()
+    elif hasattr(cmap, "copy"):
+        cmap = cmap.copy()
+    try:
+        cmap.set_bad((0, 0, 0, 0))
+    except Exception:
+        pass
+    return cmap
 
 
-def basemap(ax, ccrs, cfeature):
-    ax.add_feature(cfeature.STATES.with_scale("10m"), linewidth=0.6, edgecolor="#333")
-    ax.add_feature(cfeature.BORDERS.with_scale("10m"), linewidth=0.4)
-    ax.coastlines(resolution="10m", linewidth=0.4)
-    for name, (lat, lon) in CITIES.items():
-        ax.plot(lon, lat, "k.", markersize=4, transform=ccrs.PlateCarree())
-        ax.text(
-            lon + 0.05,
-            lat + 0.05,
-            name,
-            transform=ccrs.PlateCarree(),
-            fontsize=7,
-            color="#111",
-        )
+def save_overlay(
+    path: Path,
+    lons,
+    lats,
+    data,
+    bounds: list[list[float]],
+    *,
+    cmap="turbo",
+    vmin=None,
+    vmax=None,
+    norm=None,
+    mask_below=None,
+) -> None:
+    """North-up Plate-Carree raster filling the figure; transparent outside data."""
+    import matplotlib
 
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-def save_fig(fig, plt, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, dpi=120, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    arr = np.ma.masked_invalid(np.asarray(data, dtype=float))
+    if mask_below is not None:
+        arr = np.ma.masked_less(arr, mask_below)
 
+    cmap = _transparent_cmap(cmap)
+    (south, west), (north, east) = bounds
 
-def plot_field(ccrs, plt, lats, lons, data, title, cbar_label, out, vmin=None, vmax=None, cmap="turbo", levels=None):
-    import cartopy.feature as cfeature
+    fig = plt.figure(figsize=overlay_figsize(bounds), frameon=False)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_axis_off()
+    ax.set_xlim(west, east)
+    ax.set_ylim(south, north)
+    ax.set_facecolor("none")
+    fig.patch.set_facecolor("none")
 
-    fig = plt.figure(figsize=(8.5, 7.2))
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.set_extent([float(np.min(lons)), float(np.max(lons)), float(np.min(lats)), float(np.max(lats))])
-    if levels is not None:
-        cf = ax.contourf(
-            lons, lats, data, levels=levels, cmap=cmap, extend="both", transform=ccrs.PlateCarree()
-        )
+    regular = (
+        getattr(lons, "ndim", 1) == 2
+        and getattr(lats, "ndim", 1) == 2
+        and lats.shape == arr.shape
+        and lons.shape == arr.shape
+        and np.allclose(lats[:, 0], lats[:, -1])
+        and np.allclose(lons[0, :], lons[-1, :])
+    )
+    im_kw = {"cmap": cmap, "interpolation": "bilinear", "aspect": "auto"}
+    if norm is not None:
+        im_kw["norm"] = norm
     else:
-        cf = ax.pcolormesh(
-            lons, lats, data, vmin=vmin, vmax=vmax, cmap=cmap, transform=ccrs.PlateCarree(), shading="auto"
-        )
-    basemap(ax, ccrs, cfeature)
-    ax.set_title(title, fontsize=11)
-    cb = plt.colorbar(cf, ax=ax, shrink=0.82, pad=0.02)
-    cb.set_label(cbar_label)
-    save_fig(fig, plt, out)
+        im_kw["vmin"] = vmin
+        im_kw["vmax"] = vmax
+    if regular:
+        ax.imshow(arr, origin="lower", extent=[west, east, south, north], **im_kw)
+    else:
+        mesh_kw = {"cmap": cmap, "shading": "nearest", "antialiased": False}
+        if norm is not None:
+            mesh_kw["norm"] = norm
+        else:
+            mesh_kw["vmin"] = vmin
+            mesh_kw["vmax"] = vmax
+        ax.pcolormesh(lons, lats, arr, **mesh_kw)
+    fig.savefig(
+        path,
+        dpi=120,
+        transparent=True,
+        facecolor="none",
+        edgecolor="none",
+        pad_inches=0,
+    )
+    plt.close(fig)
 
 
 def dewpoint_c(q2, psfc):
@@ -127,72 +191,189 @@ def nearest_ij(lats, lons, lat, lon):
     return int(idx[0]), int(idx[1])
 
 
-def _convert_label(path: Path, bg: str, fg: str, title: str, lines: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    convert = shutil.which("convert")
-    if not convert:
-        raise SystemExit("ImageMagick `convert` is required for --placeholder on this host")
-    caption = "\\n".join([title, *lines])
-    subprocess.run(
-        [
-            convert,
-            "-size",
-            "960x720",
-            f"xc:{bg}",
-            "-gravity",
-            "center",
-            "-font",
-            "DejaVu-Sans",
-            "-pointsize",
-            "28",
-            "-fill",
-            fg,
-            "-annotate",
-            "0",
-            caption,
-            str(path),
-        ],
-        check=True,
+def write_meta(out_root: Path, cycle: str, frames: int, bounds, **extra) -> dict:
+    (south, west), (north, east) = bounds
+    meta = {
+        "cycle": cycle,
+        "frames": frames,
+        "products": PRODUCTS,
+        "bounds": [[south, west], [north, east]],
+        "center": [REF_LAT, REF_LON],
+        "ref_lat": REF_LAT,
+        "ref_lon": REF_LON,
+        "domain_km": DOMAIN_KM,
+    }
+    meta.update(extra)
+    (out_root / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    return meta
+
+
+def _mesh(bounds: list[list[float]], n: int = 301):
+    (south, west), (north, east) = bounds
+    lats = np.linspace(south, north, n)
+    lons = np.linspace(west, east, n)
+    lon2d, lat2d = np.meshgrid(lons, lats)
+    return lat2d, lon2d
+
+
+def _dist_km(lat2d, lon2d, lat0, lon0):
+    return np.hypot((lat2d - lat0) * KM_PER_DEG_LAT, (lon2d - lon0) * km_per_deg_lon())
+
+
+def _storm_center(fxx: int) -> tuple[float, float]:
+    """Placeholder cell drifts NE across the valley through the 18 h cycle."""
+    return 32.78 + 0.055 * fxx, -112.72 + 0.062 * fxx
+
+
+def _synth_fields(lat2d, lon2d, fxx: int) -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(12 + fxx)
+    slat, slon = _storm_center(fxx)
+    d = _dist_km(lat2d, lon2d, slat, slon)
+    core = np.exp(-((d / 22.0) ** 2))
+    ring = np.exp(-(((d - 38.0) / 16.0) ** 2))
+    noise = 0.12 * rng.random(lat2d.shape)
+    dbz = np.clip(62 * core + 28 * ring + 8 * noise, 0, 75)
+
+    precip = np.clip(1.6 * core + 0.35 * ring, 0, 3.0)
+    precip = np.where(dbz >= 18, precip, 0.0)
+
+    # 12Z = 05:00 MST; afternoon peak around F10 (15:00 MST).
+    diurnal = 78 + 28 * math.sin(math.pi * max(fxx - 1, 0) / 14.0)
+    t2 = (
+        diurnal
+        - 6.5 * (lat2d - REF_LAT) / 1.35
+        + 4.0 * np.exp(-(_dist_km(lat2d, lon2d, REF_LAT, REF_LON) / 45.0) ** 2)
+        - 8.0 * core
+        + rng.normal(0, 0.4, lat2d.shape)
     )
+
+    gust = 8 + 28 * core + 12 * ring + 4 * rng.random(lat2d.shape)
+    cape = np.clip(
+        900
+        + 2200 * math.sin(math.pi * max(fxx, 0) / 16.0)
+        - 400 * (lat2d - 32.9)
+        + 1800 * core
+        + rng.normal(0, 40, lat2d.shape),
+        0,
+        4500,
+    )
+    return {"refl": dbz, "precip": precip, "t2": t2, "wind": gust, "cape": cape}
+
+
+def _placeholder_meteogram(path: Path, cycle: str, hours: int) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    x = np.arange(hours + 1)
+    t2 = 78 + 28 * np.sin(np.pi * np.maximum(x - 1, 0) / 14.0)
+    td = t2 - 22 + 4 * np.sin(x / 3.0)
+    wind = 8 + 10 * np.sin(x / 4.0) ** 2
+    precip = np.where((x >= 8) & (x <= 14), 0.08 * np.exp(-(((x - 11) / 2.4) ** 2)), 0.0)
+
+    fig, axes = plt.subplots(3, 1, figsize=(9.2, 6.4), sharex=True, facecolor="#121826")
+    for ax in axes:
+        ax.set_facecolor("#1a2230")
+        ax.tick_params(colors="#c5d0dc")
+        ax.yaxis.label.set_color("#c5d0dc")
+        for spine in ax.spines.values():
+            spine.set_color("#314155")
+        ax.grid(True, alpha=0.25, color="#8aa0b5")
+
+    axes[0].plot(x, t2, color="#e76f51", lw=2, label="T 2 m")
+    axes[0].plot(x, td, color="#4cc9f0", lw=2, label="Td 2 m")
+    axes[0].set_ylabel("°F")
+    axes[0].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[0].set_title(f"KPHX meteogram — placeholder {cycle}", color="#e8eef4", fontsize=12)
+    axes[1].plot(x, wind, color="#90be6d", lw=2, label="10 m wind")
+    axes[1].plot(x, wind + 6, color="#f4a261", lw=2, label="gust")
+    axes[1].set_ylabel("kt")
+    axes[1].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[2].bar(x, precip, color="#4cc9f0", label="1-h precip")
+    axes[2].plot(x, np.cumsum(precip), color="#e8eef4", label="accumulated")
+    axes[2].set_ylabel("inches")
+    axes[2].set_xlabel("forecast hour  (12Z cycle, MST = UTC−7)", color="#8aa0b5")
+    axes[2].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[2].set_xticks(x[::2])
+    axes[2].set_xticklabels([f"F{i:02d}" for i in x[::2]], color="#c5d0dc")
+    fig.tight_layout()
+    fig.savefig(path, dpi=120, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
 
 
 def plot_placeholder(out_root: Path, cycle: str, hours: int) -> None:
-    """Labeled PNG frames matching the S3 layout, no wrfout required."""
+    """Synthetic georeferenced overlays matching the S3 layout (no wrfout)."""
+    bounds = domain_bounds_from_center()
+    lat2d, lon2d = _mesh(bounds)
     nframes = hours + 1
-    for prod, (bg, fg, title) in PLACEHOLDER_COLORS.items():
-        if prod == "meteogram":
-            dest = out_root / "meteogram" / "f00.png"
-            _convert_label(
-                dest,
-                bg,
-                fg,
-                title,
-                [f"cycle {cycle}", "T / Td / wind / precip", "awaiting first WRF run"],
-            )
-            shutil.copyfile(dest, out_root / "meteogram" / "kphx.png")
-            continue
-        for i in range(nframes):
-            fxx = f"f{i:02d}"
-            _convert_label(
-                out_root / prod / f"{fxx}.png",
-                bg,
-                fg,
-                title,
-                [f"Phoenix 1 km WRF  {cycle}  {fxx.upper()}", "placeholder — no wrfout yet"],
-            )
-    meta = {
-        "cycle": cycle,
-        "frames": nframes,
-        "products": PRODUCTS,
-        "placeholder": True,
-    }
-    (out_root / "meta.json").write_text(json.dumps(meta, indent=2))
-    print(f"Wrote {nframes} placeholder frames under {out_root}")
+    cmap, norm = nws_refl_cmap()
+
+    for i in range(nframes):
+        fxx = f"f{i:02d}"
+        fields = _synth_fields(lat2d, lon2d, i)
+        save_overlay(
+            out_root / "refl" / f"{fxx}.png",
+            lon2d,
+            lat2d,
+            fields["refl"],
+            bounds,
+            cmap=cmap,
+            norm=norm,
+            mask_below=5,
+        )
+        save_overlay(
+            out_root / "precip" / f"{fxx}.png",
+            lon2d,
+            lat2d,
+            fields["precip"],
+            bounds,
+            cmap="YlGnBu",
+            vmin=0.01,
+            vmax=2.5,
+            mask_below=0.01,
+        )
+        save_overlay(
+            out_root / "t2" / f"{fxx}.png",
+            lon2d,
+            lat2d,
+            fields["t2"],
+            bounds,
+            cmap="turbo",
+            vmin=50,
+            vmax=120,
+        )
+        save_overlay(
+            out_root / "wind" / f"{fxx}.png",
+            lon2d,
+            lat2d,
+            fields["wind"],
+            bounds,
+            cmap="YlOrRd",
+            vmin=0,
+            vmax=50,
+        )
+        save_overlay(
+            out_root / "cape" / f"{fxx}.png",
+            lon2d,
+            lat2d,
+            fields["cape"],
+            bounds,
+            cmap="YlOrRd",
+            vmin=0,
+            vmax=4000,
+        )
+
+    meteo = out_root / "meteogram" / "f00.png"
+    _placeholder_meteogram(meteo, cycle, hours)
+    shutil.copyfile(meteo, out_root / "meteogram" / "kphx.png")
+    write_meta(out_root, cycle, nframes, bounds, placeholder=True)
+    print(f"Wrote {nframes} overlay frames under {out_root}")
+    print(f"bounds={bounds}")
 
 
 def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
-    import cartopy.crs as ccrs
-    import cartopy.feature as cfeature
     import matplotlib
 
     matplotlib.use("Agg")
@@ -211,6 +392,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
         "precip_hour": [],
         "precip_acc": [],
     }
+    bounds = None
+    cmap, norm = nws_refl_cmap()
 
     for i, fn in enumerate(files):
         nc = Dataset(fn)
@@ -221,6 +404,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
         lats, lons = latlon_coords(getvar(nc, "T2"))
         lats = to_np(lats)
         lons = to_np(lons)
+        if bounds is None:
+            bounds = domain_bounds_from_grid(lats, lons)
 
         t2 = to_np(getvar(nc, "T2"))
         t2f = t2 * 9 / 5 - 459.67
@@ -256,90 +441,58 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             else:
                 mucape = np.full_like(t2, np.nan)
 
-        title_suffix = f"Phoenix 1 km WRF  {valid} UTC  ({cycle} {fxx})"
+        speed = gust if gust is not None else wspd
 
-        cmap, norm = nws_refl_cmap()
-        fig = plt.figure(figsize=(8.5, 7.2))
-        ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent([float(np.min(lons)), float(np.max(lons)), float(np.min(lats)), float(np.max(lats))])
-        cf = ax.contourf(
+        save_overlay(
+            out_root / "refl" / f"{fxx}.png",
             lons,
             lats,
-            np.ma.masked_less(dbz, 5),
-            levels=REFL_LEVELS,
+            dbz,
+            bounds,
             cmap=cmap,
             norm=norm,
-            extend="max",
-            transform=ccrs.PlateCarree(),
+            mask_below=5,
         )
-        basemap(ax, ccrs, cfeature)
-        ax.set_title(f"Simulated composite reflectivity\n{title_suffix}", fontsize=11)
-        cb = plt.colorbar(cf, ax=ax, shrink=0.82, pad=0.02, ticks=REFL_LEVELS)
-        cb.set_label("dBZ")
-        save_fig(fig, plt, out_root / "refl" / f"{fxx}.png")
-
-        plot_field(
-            ccrs,
-            plt,
-            lats,
-            lons,
-            hour / 25.4,
-            f"1-hour precipitation\n{title_suffix}",
-            "inches",
+        save_overlay(
             out_root / "precip" / f"{fxx}.png",
-            cmap="YlGnBu",
-            levels=[0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.5, 2, 3],
-        )
-
-        plot_field(
-            ccrs,
-            plt,
-            lats,
             lons,
-            t2f,
-            f"2 m temperature\n{title_suffix}",
-            "°F",
+            lats,
+            hour / 25.4,
+            bounds,
+            cmap="YlGnBu",
+            vmin=0.01,
+            vmax=2.5,
+            mask_below=0.01,
+        )
+        save_overlay(
             out_root / "t2" / f"{fxx}.png",
+            lons,
+            lats,
+            t2f,
+            bounds,
+            cmap="turbo",
             vmin=50,
             vmax=120,
-            cmap="turbo",
         )
-
-        fig = plt.figure(figsize=(8.5, 7.2))
-        ax = plt.axes(projection=ccrs.PlateCarree())
-        ax.set_extent([float(np.min(lons)), float(np.max(lons)), float(np.min(lats)), float(np.max(lats))])
-        skip = max(1, lats.shape[0] // 22)
-        speed = gust if gust is not None else wspd
-        cf = ax.pcolormesh(
-            lons, lats, speed, vmin=0, vmax=50, cmap="YlOrRd", transform=ccrs.PlateCarree(), shading="auto"
-        )
-        ax.barbs(
-            lons[::skip, ::skip],
-            lats[::skip, ::skip],
-            u10[::skip, ::skip] * 1.94384,
-            v10[::skip, ::skip] * 1.94384,
-            length=5,
-            transform=ccrs.PlateCarree(),
-            linewidth=0.4,
-        )
-        basemap(ax, ccrs, cfeature)
-        ax.set_title(f"10 m wind + gusts\n{title_suffix}", fontsize=11)
-        cb = plt.colorbar(cf, ax=ax, shrink=0.82, pad=0.02)
-        cb.set_label("gust or wind (kt)")
-        save_fig(fig, plt, out_root / "wind" / f"{fxx}.png")
-
-        plot_field(
-            ccrs,
-            plt,
-            lats,
+        save_overlay(
+            out_root / "wind" / f"{fxx}.png",
             lons,
-            mucape,
-            f"Most-unstable CAPE\n{title_suffix}",
-            "J kg⁻¹",
+            lats,
+            speed,
+            bounds,
+            cmap="YlOrRd",
+            vmin=0,
+            vmax=50,
+        )
+        save_overlay(
             out_root / "cape" / f"{fxx}.png",
+            lons,
+            lats,
+            mucape,
+            bounds,
+            cmap="YlOrRd",
             vmin=0,
             vmax=4000,
-            cmap="YlOrRd",
         )
 
         j, iidx = nearest_ij(lats, lons, KPHX[0], KPHX[1])
@@ -352,42 +505,50 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
         series["precip_acc"].append(float(acc[j, iidx] / 25.4))
         nc.close()
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=(10, 7.2), sharex=True, facecolor="#121826")
     x = np.arange(len(series["times"]))
-    axes[0].plot(x, series["t2f"], color="#d62728", label="T 2 m")
-    axes[0].plot(x, series["tdf"], color="#1f77b4", label="Td 2 m")
+    for ax in axes:
+        ax.set_facecolor("#1a2230")
+        ax.tick_params(colors="#c5d0dc")
+        ax.yaxis.label.set_color("#c5d0dc")
+        for spine in ax.spines.values():
+            spine.set_color("#314155")
+        ax.grid(True, alpha=0.25, color="#8aa0b5")
+    axes[0].plot(x, series["t2f"], color="#e76f51", lw=2, label="T 2 m")
+    axes[0].plot(x, series["tdf"], color="#4cc9f0", lw=2, label="Td 2 m")
     axes[0].set_ylabel("°F")
-    axes[0].legend(loc="upper right", fontsize=8)
-    axes[0].set_title("KPHX meteogram — Phoenix 1 km WRF")
-    axes[0].grid(True, alpha=0.3)
-
-    axes[1].plot(x, series["wspd"], color="#2ca02c", label="10 m wind")
-    axes[1].plot(x, series["gust"], color="#ff7f0e", label="gust")
+    axes[0].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[0].set_title("KPHX meteogram — Phoenix 1 km WRF", color="#e8eef4", fontsize=12)
+    axes[1].plot(x, series["wspd"], color="#90be6d", lw=2, label="10 m wind")
+    axes[1].plot(x, series["gust"], color="#f4a261", lw=2, label="gust")
     axes[1].set_ylabel("kt")
-    axes[1].legend(loc="upper right", fontsize=8)
-    axes[1].grid(True, alpha=0.3)
-
-    axes[2].bar(x, series["precip_hour"], color="#17becf", label="1-h precip")
-    axes[2].plot(x, series["precip_acc"], color="#000", label="accumulated")
+    axes[1].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[2].bar(x, series["precip_hour"], color="#4cc9f0", label="1-h precip")
+    axes[2].plot(x, series["precip_acc"], color="#e8eef4", label="accumulated")
     axes[2].set_ylabel("inches")
-    axes[2].legend(loc="upper right", fontsize=8)
-    axes[2].grid(True, alpha=0.3)
+    axes[2].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
     labels = [t[5:16] for t in series["times"]]
     axes[2].set_xticks(x[:: max(1, len(x) // 10)])
-    axes[2].set_xticklabels(labels[:: max(1, len(x) // 10)], rotation=30, ha="right")
+    axes[2].set_xticklabels(labels[:: max(1, len(x) // 10)], rotation=30, ha="right", color="#c5d0dc")
     fig.tight_layout()
     meteo = out_root / "meteogram" / "f00.png"
-    save_fig(fig, plt, meteo)
+    meteo.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(meteo, dpi=120, facecolor=fig.get_facecolor(), bbox_inches="tight")
+    plt.close(fig)
     shutil.copyfile(meteo, out_root / "meteogram" / "kphx.png")
 
-    meta = {
-        "cycle": cycle,
-        "frames": len(files),
-        "products": PRODUCTS,
-        "kphx": series,
-    }
-    (out_root / "meta.json").write_text(json.dumps(meta, indent=2))
-    print(f"Wrote {len(files)} frames under {out_root}")
+    if bounds is None:
+        bounds = domain_bounds_from_center()
+    write_meta(out_root, cycle, len(files), bounds, placeholder=False, kphx=series)
+    print(f"Wrote {len(files)} overlay frames under {out_root}")
+    print(f"bounds={bounds}")
+
+
+def open_times(wrfout_dir: Path):
+    files = sorted(glob(str(wrfout_dir / "wrfout_d01_*")))
+    if not files:
+        raise SystemExit(f"No wrfout files in {wrfout_dir}")
+    return files
 
 
 def main():
@@ -399,7 +560,7 @@ def main():
     p.add_argument(
         "--placeholder",
         action="store_true",
-        help="Write labeled placeholder PNGs (no wrfout / wrf-python)",
+        help="Write synthetic overlay PNGs (no wrfout / wrf-python)",
     )
     args = p.parse_args()
 

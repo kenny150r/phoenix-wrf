@@ -2,7 +2,7 @@
 
 Daily 18-hour WRF run over Phoenix on this machine, initialized from the **12Z HRRR**. Maps and a KPHX meteogram are published to GitHub Pages; PNG frames live on S3 for 14 days. `wrfout` stays local for 48 hours.
 
-- Viewer: https://kenny150r.github.io/phoenix-wrf/
+- Viewer: https://kenny150r.github.io/phoenix-wrf/ (full-page Leaflet map, forecast fields as georeferenced overlays)
 - Domain: 301×301 at 1 km, `ref_lat=33.45`, `ref_lon=-112.07`
 - Physics: Thompson MP, MYNN PBL, RRTMG, no cumulus, `time_step=6`, 4 MPI ranks
 - Cycle: systemd timer at **14:20 UTC** (07:20 MST)
@@ -14,7 +14,7 @@ Daily 18-hour WRF run over Phoenix on this machine, initialized from the **12Z H
 | `scripts/run_forecast.sh` | Daily driver (download → WPS → real → wrf → plot → S3 → purge) |
 | `scripts/compile_wrf.sh` | WRF 4.6.1 + WPS 4.6.0 GNU dmpar (no Anaconda MPI) |
 | `config/` | namelists, iofields, HRRR Vtable |
-| `web/` | Static time-slider Pages app |
+| `web/` | Full-page Leaflet map (GitHub Pages) |
 | `src/WRF`, `src/WPS` | Model builds (not in git) |
 | `geog/` | WPS_GEOG high-res subset (not in git) |
 | `data/wrfout/` | Local netCDF, 48 h |
@@ -33,7 +33,7 @@ Python post-processing uses conda env `wrf-post` (`herbie-data`, `wrf-python`, `
 
 ## Viewer and S3
 
-Static GitHub Pages app in `web/` (time slider, product tabs, last-successful-run banner from `latest.json`). Frames are loaded from S3, not stored in the repo.
+Static GitHub Pages app in `web/`: a full-viewport Leaflet map with floating product/time/legend controls. Forecast fields are transparent georeferenced PNG overlays (`L.imageOverlay`) placed with `bounds` from `latest.json`. The KPHX meteogram is a chart panel, not a spatial overlay. Frames are loaded from S3, not stored in the repo.
 
 - Site: https://kenny150r.github.io/phoenix-wrf/
 - Bucket: `s3://phx-wrf-forecast` (`us-east-1`), public `GetObject`, CORS for `https://kenny150r.github.io`, lifecycle expire `runs/` after 14 days

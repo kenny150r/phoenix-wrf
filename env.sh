@@ -8,6 +8,8 @@ export PHX_ROOT="$ROOT"
 
 export PATH="$ROOT/opt/bin:$PREFIX/usr/bin:/usr/local/bin:/usr/bin:/bin"
 export LD_LIBRARY_PATH="$PREFIX/usr/lib/x86_64-linux-gnu:$PREFIX/usr/lib/x86_64-linux-gnu/openmpi/lib:$PREFIX/usr/lib/x86_64-linux-gnu/hdf5/serial:/usr/lib/x86_64-linux-gnu"
+# gcc/gfortran search path for -lmpi etc. (Ubuntu OpenMPI wrappers omit this -L)
+export LIBRARY_PATH="$PREFIX/usr/lib/x86_64-linux-gnu:$PREFIX/usr/lib/x86_64-linux-gnu/openmpi/lib:${LIBRARY_PATH:-}"
 
 unset CONDA_PREFIX CONDA_DEFAULT_ENV CONDA_PYTHON_EXE CONDA_SHLVL PYTHONHOME PYTHONPATH
 unset CONDA_PROMPT_MODIFIER CONDA_EXE CONDA_PYTHON_SYSCONFIGDATA_NAME

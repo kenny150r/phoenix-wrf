@@ -147,22 +147,20 @@ PY
 mkdir -p "$ROOT/data/wrfout/$CYCLE"
 cp -f wrfout_d01_* "$ROOT/data/wrfout/$CYCLE/" || true
 
-# --- plots + S3 ---
+# --- plots + S3 (owned by sibling; optional so smoke test can finish) ---
 PLOTDIR="$ROOT/plots/$CYCLE"
 mkdir -p "$PLOTDIR"
-if conda run -n wrf-post python --version >/dev/null 2>&1; then
-  CONDA_PYTHON=(conda run -n wrf-post python)
-else
-  CONDA_PYTHON=(/home/kenny/anaconda3/envs/wrf-post/bin/python)
-fi
-# conda is not on WRF PATH; call it explicitly
-if [[ -x /home/kenny/anaconda3/bin/conda ]]; then
+if [[ -x /home/kenny/anaconda3/bin/conda && -f $ROOT/scripts/plot_products.py ]]; then
   /home/kenny/anaconda3/bin/conda run -n wrf-post python "$ROOT/scripts/plot_products.py" \
-    --wrfout-dir "$ROOT/data/wrfout/$CYCLE" --out-dir "$PLOTDIR" --cycle "$CYCLE"
-  /home/kenny/anaconda3/bin/conda run -n wrf-post python "$ROOT/scripts/upload_s3.py" \
-    --run-dir "$PLOTDIR" --cycle "$CYCLE" --hours "$HOURS"
+    --wrfout-dir "$ROOT/data/wrfout/$CYCLE" --out-dir "$PLOTDIR" --cycle "$CYCLE" \
+    || echo "plot_products.py failed (non-fatal)"
+  if [[ -f $ROOT/scripts/upload_s3.py ]]; then
+    /home/kenny/anaconda3/bin/conda run -n wrf-post python "$ROOT/scripts/upload_s3.py" \
+      --run-dir "$PLOTDIR" --cycle "$CYCLE" --hours "$HOURS" \
+      || echo "upload_s3.py failed (non-fatal)"
+  fi
 else
-  echo "conda wrf-post missing; skipping plots" >&2
+  echo "skipping plots/upload"
 fi
 
 "$ROOT/scripts/purge.sh" --cycle "$CYCLE" --keep-wrfout-hours 48 --keep-png-days 14

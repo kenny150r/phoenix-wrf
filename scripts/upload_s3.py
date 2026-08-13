@@ -48,6 +48,18 @@ def main():
         uploaded += 1
         print(f"put s3://{args.bucket}/{key}")
 
+    meta = {}
+    meta_path = run_dir / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+        except json.JSONDecodeError:
+            meta = {}
+
+    # Leaflet L.imageOverlay bounds: [[south, west], [north, east]]
+    default_bounds = [[32.10253, -113.68496], [34.79747, -110.45504]]
+    bounds = meta.get("bounds") or default_bounds
+
     latest = {
         "cycle": args.cycle,
         "status": args.status,
@@ -58,6 +70,11 @@ def main():
         "meteogram_url": f"https://{args.bucket}.s3.amazonaws.com/runs/{args.cycle}/meteogram/f00.png",
         "completed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "frames": args.hours + 1,
+        "bounds": bounds,
+        "center": meta.get("center") or [33.45, -112.07],
+        "ref_lat": meta.get("ref_lat", 33.45),
+        "ref_lon": meta.get("ref_lon", -112.07),
+        "domain_km": meta.get("domain_km", 300),
     }
     latest_path = run_dir / "latest.json"
     latest_path.write_text(json.dumps(latest, indent=2) + "\n")

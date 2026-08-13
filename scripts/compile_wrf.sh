@@ -89,8 +89,28 @@ if [[ ! -f configure.wrf ]]; then
   sed -i "s|^DM_CC *=.*|DM_CC = mpicc -DMPI2_SUPPORT|" configure.wrf
 fi
 
+ensure_md_calls() {
+  # m4 without libsigsegv leaves a 0-byte md_calls.inc; make then skips
+  # regeneration and module_io.F compiles without CONTAINS.
+  if [[ -s frame/md_calls.inc ]] && grep -q CONTAINS frame/md_calls.inc; then
+    return 0
+  fi
+  echo "=== generating frame/md_calls.inc ==="
+  rm -f frame/md_calls.inc
+  if ! m4 --version >/dev/null 2>&1; then
+    echo "WARNING: m4 cannot run (libsigsegv?); copying arch/md_calls.inc" >&2
+    cp -f "$ROOT/src/WRF/arch/md_calls.inc" frame/md_calls.inc
+  elif ! ( cd frame && m4 -G md_calls.m4 > md_calls.inc ) || ! grep -q CONTAINS frame/md_calls.inc; then
+    echo "WARNING: m4 md_calls.m4 failed; copying arch/md_calls.inc" >&2
+    cp -f "$ROOT/src/WRF/arch/md_calls.inc" frame/md_calls.inc
+  fi
+}
+
 if [[ ! -x main/wrf.exe ]]; then
   echo "=== compiling WRF em_real (this takes a while) ==="
+  # Drop leftover objects from a failed make -i so module_io.f90 is rebuilt.
+  ./clean || true
+  ensure_md_calls
   "$ROOT/opt/bin/csh" -c "setenv J 4; setenv NETCDF $NETCDF; setenv WRFIO_NCD_LARGE_FILE_SUPPORT 1; ./compile em_real"
   ls -l main/wrf.exe main/real.exe
 fi
@@ -134,7 +154,7 @@ fi
 
 if [[ ! -x geogrid.exe || ! -x ungrib.exe || ! -x metgrid.exe ]]; then
   echo "=== compiling WPS ==="
-  "$ROOT/opt/bin/csh" -c "setenv WRF_DIR $ROOT/src/WRF; setenv NETCDF $NETCDF; setenv JASPERLIB $JASPERLIB; setenv JASPERINC $JASPERINC; ./compile"
+  "$ROOT/opt/bin/csh" -c "setenv J 4; setenv WRF_DIR $ROOT/src/WRF; setenv NETCDF $NETCDF; setenv JASPERLIB $JASPERLIB; setenv JASPERINC $JASPERINC; ./compile"
   ls -l geogrid.exe ungrib.exe metgrid.exe
 fi
 

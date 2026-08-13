@@ -3,36 +3,58 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Phoenix 1 km WRF — monsoon forecast</title>
+  <title>Phoenix 1 km WRF</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Phoenix 1 km WRF</h1>
-      <p class="sub">Daily 18-hour forecast from 12Z HRRR · Thompson / MYNN / RRTMG</p>
-    </div>
+  <div id="map" role="application" aria-label="Phoenix WRF forecast map"></div>
+
+  <aside class="panel panel-tl" id="brand-panel">
+    <h1>Phoenix 1 km WRF</h1>
+    <p class="sub">18-hour monsoon forecast · 12Z HRRR · Thompson / MYNN / RRTMG</p>
     <div id="banner" class="banner" role="status">Loading latest run…</div>
-  </header>
-  <nav id="tabs" aria-label="Forecast products"></nav>
-  <section id="viewer">
-    <div id="stage">
-      <img id="frame" alt="Forecast frame" />
-      <div id="frame-error" hidden>No frame for this hour yet.</div>
+    <nav id="products" class="products" aria-label="Forecast products"></nav>
+  </aside>
+
+  <aside class="panel panel-tr" id="legend-panel">
+    <div id="legend"></div>
+    <label class="opacity-row">
+      Overlay
+      <input id="opacity" type="range" min="15" max="100" value="75" />
+      <span id="opacity-label">75%</span>
+    </label>
+  </aside>
+
+  <div class="panel panel-bc" id="time-panel">
+    <div class="time-head">
+      <span id="hour-label">F00</span>
+      <span id="valid-label"></span>
     </div>
-    <div id="caption"></div>
     <div class="slider-row" id="slider-row">
       <button id="prev" type="button" aria-label="Previous hour">◀</button>
       <input id="hour" type="range" min="0" max="18" value="0" />
       <button id="next" type="button" aria-label="Next hour">▶</button>
       <button id="play" type="button">Play</button>
-      <span id="hour-label">F00</span>
     </div>
-  </section>
-  <footer>
-    Frames on S3 (<code>phx-wrf-forecast</code>, 14-day retention). Model output stays on the forecast machine.
-    Source: <a href="https://github.com/kenny150r/phoenix-wrf">kenny150r/phoenix-wrf</a>
-  </footer>
+  </div>
+
+  <aside class="panel panel-meteo" id="meteo-panel" hidden>
+    <div class="meteo-head">
+      <strong>KPHX meteogram</strong>
+      <button id="meteo-close" type="button" aria-label="Close meteogram">✕</button>
+    </div>
+    <img id="meteo-img" alt="KPHX meteogram" />
+    <p class="meteo-note">Station chart — not a map overlay.</p>
+  </aside>
+
+  <p id="frame-error" class="toast" hidden>No frame for this hour yet.</p>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
   <script src="app.js"></script>
 </body>
 </html>
