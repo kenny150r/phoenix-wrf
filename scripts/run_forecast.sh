@@ -5,6 +5,21 @@ set -euo pipefail
 ROOT="/home/kenny/phoenix-wrf"
 # Survive a closed terminal (00Z 13 Aug died mid-ungrib after the session went away).
 trap '' HUP
+
+# Bash reads $0 in 8 KB chunks. A git commit that rewrites this file (or
+# download_hrrr.sh) while the forecast is running splices the parser —
+# 12Z 13 Aug 2026 downloaded all 19 HRRR hours then died with
+# `break`/`fi` syntax errors after commit b58fccc landed mid-loop.
+if [[ -z ${PHX_FROZEN_DRIVER:-} ]]; then
+  mkdir -p "$ROOT/data/logs"
+  export PHX_FROZEN_DRIVER=1
+  PHX_FROZEN_PATH=$(mktemp "$ROOT/data/logs/run_forecast.XXXXXX")
+  export PHX_FROZEN_PATH
+  cp -f "$0" "$PHX_FROZEN_PATH"
+  chmod 700 "$PHX_FROZEN_PATH"
+  exec /bin/bash "$PHX_FROZEN_PATH" "$@"
+fi
+
 # shellcheck disable=SC1091
 source "$ROOT/env.sh"
 export AWS_EC2_METADATA_DISABLED=true
@@ -131,6 +146,7 @@ on_exit() {
     rm -f "$ROOT/work/wps"/FILE:* "$ROOT/work/wps"/SFC:* \
           "$ROOT/work/wps"/PFILE:* "$ROOT/work/wps"/GRIBFILE.* 2>/dev/null || true
   fi
+  rm -f "${PHX_FROZEN_PATH:-}"
 }
 trap on_exit EXIT
 

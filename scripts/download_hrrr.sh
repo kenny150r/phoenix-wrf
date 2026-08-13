@@ -5,6 +5,17 @@
 # Usage: download_hrrr.sh YYYYMMDD [FMAX] [CYCLE_HOUR]
 set -euo pipefail
 ROOT="${PHX_ROOT:-/home/kenny/phoenix-wrf}"
+
+# Snapshot before running: a live rewrite of this file mid-loop killed the
+# 12Z 13 Aug 2026 download after f18 (`break` outside a loop / unexpected `fi`).
+if [[ ${PHX_HRRR_FROZEN:-0} -ne 1 ]]; then
+  export PHX_HRRR_FROZEN=1
+  PHX_HRRR_SNAP=$(mktemp)
+  export PHX_HRRR_SNAP
+  cp -f "$0" "$PHX_HRRR_SNAP"
+  exec /bin/bash "$PHX_HRRR_SNAP" "$@"
+fi
+
 DATE="${1:?usage: $0 YYYYMMDD [FMAX] [CYCLE_HOUR]}"
 FMAX="${2:-18}"
 CYCLE=$(printf '%02d' "$((10#${3:-12}))")
@@ -84,6 +95,8 @@ is_regional() {
 
 cleanup_temps() {
   rm -f "$OUT"/*.full "$OUT"/*.sub "$OUT"/*.tmp "$OUT"/*.full.* 2>/dev/null || true
+  # Unlink the snapshot inode; bash still holds it open until exit.
+  rm -f "${PHX_HRRR_SNAP:-}"
 }
 trap cleanup_temps EXIT
 
@@ -221,11 +234,15 @@ phx_dl_status "Proving regional HRRR subset on f00"
 prs0="$OUT/hrrr.t${CYCLE}z.wrfprsf00.grib2"
 sfc0="$OUT/hrrr.t${CYCLE}z.wrfsfcf00.grib2"
 NOMADS_PRS_OK=0
-if nomads_filter prs "hrrr.t${CYCLE}z.wrfprsf00.grib2" "$prs0"; then
-  NOMADS_PRS_OK=1
-  echo "NOMADS wrfprs filter is available"
+if is_regional "$prs0" && is_regional "$sfc0"; then
+  echo "f00 already regional; skipping NOMADS prove"
 else
-  echo "NOMADS wrfprs filter unavailable (expected); using AWS + wgrib2 -small_grib"
+  if nomads_filter prs "hrrr.t${CYCLE}z.wrfprsf00.grib2" "$prs0"; then
+    NOMADS_PRS_OK=1
+    echo "NOMADS wrfprs filter is available"
+  else
+    echo "NOMADS wrfprs filter unavailable (expected); using AWS + wgrib2 -small_grib"
+  fi
 fi
 ensure_file prs "hrrr.t${CYCLE}z.wrfprsf00.grib2" "$prs0"
 ensure_file 2d "hrrr.t${CYCLE}z.wrfsfcf00.grib2" "$sfc0"
