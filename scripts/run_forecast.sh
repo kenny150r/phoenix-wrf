@@ -42,18 +42,49 @@ FINAL=0
 WATCH_PID=""
 WATCH_STOP="$LOGDIR/watch_${CYCLE}.stop"
 
+# Full-CONUS ungrib FILE: intermediates were ~111 GB (00Z 13 Aug). Abort at 40 GB free.
+MIN_FREE_KB=$((40 * 1024 * 1024))
+DISK_MON_PID=""
+DISK_ABORT="$LOGDIR/disk_abort_${CYCLE}"
+
 need_free_kb() {
-  local kb="$1" msg="$2"
+  local kb="${1:-$MIN_FREE_KB}"
+  local msg="${2:-Abort: /home below 40 GB free.}"
   local avail
-  avail=$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')
+  avail=$(df -Pk /home | awk 'NR==2 {print $4}')
   if [[ ${avail:-0} -lt $kb ]]; then
-    echo "DISK: need ${kb} KB free on $ROOT (have ${avail} KB). $msg" >&2
+    echo "DISK: need ${kb} KB free on /home (have ${avail} KB). $msg" >&2
     return 1
   fi
 }
 
-# Full-CONUS ungrib intermediates were ~111 GB and filled the disk (00Z 13 Aug).
-need_free_kb $((15 * 1024 * 1024)) "Free space before starting (WPS + wrfout)." || exit 1
+start_disk_monitor() {
+  (
+    while sleep 15; do
+      avail=$(df -Pk /home | awk 'NR==2 {print $4}')
+      if [[ ${avail:-0} -lt $MIN_FREE_KB ]]; then
+        echo "DISK: /home free ${avail} KB < 40 GB; aborting forecast pid $PPID" >&2
+        echo "${avail}" > "$DISK_ABORT"
+        python3 "$ROOT/scripts/publish_status.py" \
+          --cycle "$CYCLE" --hours "$HOURS" --run-dir "$PLOTDIR" \
+          --status failed --stage failed \
+          --stage-label "Aborted: /home below 40 GB free (${avail} KB)" \
+          || true
+        kill -TERM "$PPID" 2>/dev/null || true
+        exit 1
+      fi
+    done
+  ) &
+  DISK_MON_PID=$!
+}
+
+stop_disk_monitor() {
+  if [[ -n ${DISK_MON_PID:-} ]] && kill -0 "$DISK_MON_PID" 2>/dev/null; then
+    kill "$DISK_MON_PID" 2>/dev/null || true
+    wait "$DISK_MON_PID" 2>/dev/null || true
+  fi
+  DISK_MON_PID=""
+}
 
 mkdir -p "$LOGDIR" "$ROOT/work/wps" "$ROOT/work/wrf" "$ROOT/data/wrfout" "$PLOTDIR"
 echo "run_forecast starting $(date -u +%Y-%m-%dT%H:%M:%SZ) cycle=$CYCLE pid=$$" >> "$LOGDIR/systemd.log"
@@ -87,10 +118,16 @@ stop_watcher() {
 
 on_exit() {
   local rc=$?
+  stop_disk_monitor
   stop_watcher
   if [[ $rc -ne 0 && $FINAL -eq 0 ]]; then
-    phx_status --status failed --stage failed \
-      --stage-label "Failed during ${STAGE_LABEL} (exit ${rc})" || true
+    if [[ -f $DISK_ABORT ]]; then
+      phx_status --status failed --stage failed \
+        --stage-label "Aborted: /home below 40 GB free during ${STAGE_LABEL}" || true
+    else
+      phx_status --status failed --stage failed \
+        --stage-label "Failed during ${STAGE_LABEL} (exit ${rc})" || true
+    fi
     rm -f "$ROOT/work/wps"/FILE:* "$ROOT/work/wps"/SFC:* \
           "$ROOT/work/wps"/PFILE:* "$ROOT/work/wps"/GRIBFILE.* 2>/dev/null || true
   fi
@@ -99,6 +136,8 @@ trap on_exit EXIT
 
 LOG="$LOGDIR/forecast_${CYCLE}_${STAMP}.log"
 exec > >(tee -a "$LOG") 2>&1
+start_disk_monitor
+need_free_kb "$MIN_FREE_KB" "Free space before starting (WPS + wrfout)." || exit 1
 
 echo "=== Phoenix WRF $CYCLE hours=$HOURS pid=$$ ==="
 echo "PATH=$PATH"
@@ -111,16 +150,19 @@ if [[ ! -x $WRF_SRC/main/wrf.exe || ! -x $WPS_SRC/ungrib.exe ]]; then
   exit 1
 fi
 
-# --- HRRR ---
+# --- HRRR (regional subset only; never ungrib full CONUS) ---
 STAGE_LABEL="HRRR download"
-phx_status --status running --stage download --stage-label "Downloading HRRR ${DATE} t${CYCLE_HOUR}z"
+export PHX_CYCLE="$CYCLE" PHX_HOURS="$HOURS" PHX_PLOTDIR="$PLOTDIR"
+phx_status --status running --stage download --stage-label "Downloading HRRR ${DATE} t${CYCLE_HOUR}z (regional subset)"
 "$ROOT/scripts/download_hrrr.sh" "$DATE" "$HOURS" "$CYCLE_HOUR"
 
 GRIB="$ROOT/data/grib/$DATE"
 if find "$GRIB" -name '*.grib2' -size +80M | grep -q .; then
-  echo "WARNING: full-CONUS HRRR files present; ungrib intermediates can exceed 100 GB"
-  need_free_kb $((80 * 1024 * 1024)) "Full-CONUS ungrib needs ~80 GB free." || exit 1
+  echo "FATAL: full-CONUS HRRR still present after download; refusing ungrib" >&2
+  find "$GRIB" -name '*.grib2' -size +80M -ls >&2
+  exit 1
 fi
+need_free_kb "$MIN_FREE_KB" "Free space after HRRR download." || exit 1
 
 # --- WPS workspace ---
 WPS="$ROOT/work/wps"
@@ -156,6 +198,7 @@ fi
 
 echo "=== ungrib FILE (prs) ==="
 STAGE_LABEL="WPS ungrib (pressure)"
+need_free_kb "$MIN_FREE_KB" "Free space before ungrib." || exit 1
 phx_status --status running --stage wps --stage-label "WPS ungrib (pressure GRIB)"
 "$LINK" "$GRIB"/hrrr.t${CYCLE_HOUR}z.wrfprsf*.grib2
 ln -sfn "$ROOT/config/Vtable.HRRR" Vtable
@@ -176,8 +219,10 @@ phx_status --status running --stage wps --stage-label "WPS metgrid"
 sed -i "s/^ prefix.*/ prefix = 'FILE',/" namelist.wps
 ./metgrid.exe
 
-# Drop ungrib intermediates immediately — they were 111 GB for full-CONUS HRRR.
+# Drop ungrib intermediates and the GRIBs themselves — FILE: was 111 GB for full CONUS.
 rm -f GRIBFILE.* FILE:* SFC:* PFILE:*
+rm -f "$GRIB"/*.grib2 "$GRIB"/*.full "$GRIB"/*.sub "$GRIB"/*.tmp 2>/dev/null || true
+need_free_kb "$MIN_FREE_KB" "Free space after metgrid." || exit 1
 
 MET=$(ls -1 met_em.d01.* | head -1)
 NCDUMP_OUT=$("$ROOT/opt/bin/ncdump" -h "$MET" 2>/dev/null || true)
@@ -209,11 +254,13 @@ python3 "$ROOT/scripts/update_namelist.py" --input namelist.input --date "$DATE"
 
 echo "=== real.exe ==="
 STAGE_LABEL="real.exe"
+need_free_kb "$MIN_FREE_KB" "Free space before real.exe." || exit 1
 phx_status --status running --stage real --stage-label "Running real.exe"
 ./real.exe
 
 echo "=== wrf.exe np=4 hours=$HOURS ==="
 STAGE_LABEL="wrf.exe"
+need_free_kb "$MIN_FREE_KB" "Free space before wrf.exe." || exit 1
 phx_status --status running --stage wrf --stage-label "wrf.exe · starting F00 / ${HOURS}"
 if [[ -x $POST_PY && -f $ROOT/scripts/watch_wrfout.py ]]; then
   rm -f "$WATCH_STOP"
