@@ -29,24 +29,92 @@ REF_LON = -112.07
 DOMAIN_KM = 300.0
 KM_PER_DEG_LAT = 111.32
 
-REFL_LEVELS = np.arange(0, 80, 5)
+# Keep these hex lists in lockstep with web/app.js LEGENDS.
+# Reflectivity: NWS 88D / NCEP WDSS-II 5 dBZ steps (5–75).
+REFL_LEVELS = np.arange(5, 85, 5)
 REFL_COLORS = [
-    "#00ffff",
-    "#00b0f0",
-    "#0070ff",
+    "#00ecec",
+    "#01a0f6",
+    "#0100f6",
     "#00ff00",
-    "#00c000",
-    "#008000",
+    "#00c800",
+    "#009000",
     "#ffff00",
-    "#ffc000",
-    "#ff8000",
+    "#e7c000",
+    "#ff9000",
     "#ff0000",
+    "#d60000",
     "#c00000",
-    "#800000",
     "#ff00ff",
-    "#c000c0",
-    "#800080",
+    "#9955c9",
+    "#ffffff",
 ]
+# NWS QPE-style 1-hour precip (inches).
+PRECIP_LEVELS = np.array([0.01, 0.10, 0.25, 0.50, 0.75, 1.00, 1.50, 2.00, 2.50, 3.00])
+PRECIP_COLORS = [
+    "#98fb98",
+    "#00ee00",
+    "#009b00",
+    "#ffff4d",
+    "#ffcc00",
+    "#ff7a00",
+    "#ff0000",
+    "#b00000",
+    "#ff00ff",
+]
+# Meteorological 2 m temp (°F), blue–gold–red (no rainbow / no near-white hinge).
+T2_LEVELS = np.arange(50, 125, 5)
+T2_COLORS = [
+    "#2166ac",
+    "#4393c3",
+    "#74add1",
+    "#9dc1d9",
+    "#c5b56a",
+    "#e8d070",
+    "#f4b942",
+    "#ee8f2a",
+    "#e0691e",
+    "#d04527",
+    "#b91c1c",
+    "#991b1b",
+    "#7f1d1d",
+    "#450a0a",
+]
+# 10 m wind / gust (kt): sand → copper → wine.
+WIND_LEVELS = np.array([0, 5, 10, 15, 20, 25, 30, 35, 40, 55], dtype=float)
+WIND_COLORS = [
+    "#cfc4b0",
+    "#d4b07a",
+    "#c99050",
+    "#c4784a",
+    "#b45a32",
+    "#9a3c28",
+    "#7e2828",
+    "#641828",
+    "#3e1018",
+]
+# MUCAPE discrete meteorological bins (J kg⁻¹).
+CAPE_LEVELS = np.array([0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000], dtype=float)
+CAPE_COLORS = [
+    "#d4c48a",
+    "#f0d060",
+    "#f0a830",
+    "#e07820",
+    "#c85020",
+    "#a82828",
+    "#8c1838",
+    "#6e1048",
+    "#4a0a5c",
+]
+
+DESK_INK = "#0e1114"
+DESK_PANEL = "#14181c"
+DESK_PAPER = "#e8e0d4"
+DESK_MUTED = "#9a8f82"
+DESK_LINE = "#3a342e"
+DESK_COPPER = "#c4784a"
+DESK_SAGE = "#6a8a62"
+DESK_SLATE = "#7a8fa0"
 
 PRODUCTS = ["refl", "precip", "t2", "wind", "cape", "meteogram"]
 
@@ -85,13 +153,34 @@ def overlay_figsize(bounds: list[list[float]]) -> tuple[float, float]:
     return (height * (lon_span / lat_span), height)
 
 
-def nws_refl_cmap():
+def _binned_cmap(colors, levels):
     from matplotlib.colors import BoundaryNorm, ListedColormap
 
-    cmap = ListedColormap(REFL_COLORS)
+    cmap = ListedColormap(list(colors))
     cmap.set_bad((0, 0, 0, 0))
     cmap.set_under((0, 0, 0, 0))
-    return cmap, BoundaryNorm(REFL_LEVELS, len(REFL_COLORS))
+    cmap.set_over(colors[-1])
+    return cmap, BoundaryNorm(levels, ncolors=len(colors), clip=True)
+
+
+def nws_refl_cmap():
+    return _binned_cmap(REFL_COLORS, REFL_LEVELS)
+
+
+def nws_qpe_cmap():
+    return _binned_cmap(PRECIP_COLORS, PRECIP_LEVELS)
+
+
+def t2_cmap():
+    return _binned_cmap(T2_COLORS, T2_LEVELS)
+
+
+def wind_cmap():
+    return _binned_cmap(WIND_COLORS, WIND_LEVELS)
+
+
+def cape_cmap():
+    return _binned_cmap(CAPE_COLORS, CAPE_LEVELS)
 
 
 def _transparent_cmap(cmap):
@@ -273,31 +362,31 @@ def _placeholder_meteogram(path: Path, cycle: str, hours: int) -> None:
     wind = 8 + 10 * np.sin(x / 4.0) ** 2
     precip = np.where((x >= 8) & (x <= 14), 0.08 * np.exp(-(((x - 11) / 2.4) ** 2)), 0.0)
 
-    fig, axes = plt.subplots(3, 1, figsize=(9.2, 6.4), sharex=True, facecolor="#121826")
+    fig, axes = plt.subplots(3, 1, figsize=(9.2, 6.4), sharex=True, facecolor=DESK_INK)
     for ax in axes:
-        ax.set_facecolor("#1a2230")
-        ax.tick_params(colors="#c5d0dc")
-        ax.yaxis.label.set_color("#c5d0dc")
+        ax.set_facecolor(DESK_PANEL)
+        ax.tick_params(colors=DESK_PAPER)
+        ax.yaxis.label.set_color(DESK_PAPER)
         for spine in ax.spines.values():
-            spine.set_color("#314155")
-        ax.grid(True, alpha=0.25, color="#8aa0b5")
+            spine.set_color(DESK_LINE)
+        ax.grid(True, alpha=0.22, color=DESK_MUTED)
 
-    axes[0].plot(x, t2, color="#e76f51", lw=2, label="T 2 m")
-    axes[0].plot(x, td, color="#4cc9f0", lw=2, label="Td 2 m")
+    axes[0].plot(x, t2, color=DESK_COPPER, lw=2, label="T 2 m")
+    axes[0].plot(x, td, color=DESK_SLATE, lw=2, label="Td 2 m")
     axes[0].set_ylabel("°F")
-    axes[0].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
-    axes[0].set_title(f"KPHX meteogram — placeholder {cycle}", color="#e8eef4", fontsize=12)
-    axes[1].plot(x, wind, color="#90be6d", lw=2, label="10 m wind")
-    axes[1].plot(x, wind + 6, color="#f4a261", lw=2, label="gust")
+    axes[0].legend(loc="upper left", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
+    axes[0].set_title(f"KPHX meteogram — placeholder {cycle}", color=DESK_PAPER, fontsize=12)
+    axes[1].plot(x, wind, color=DESK_SAGE, lw=2, label="10 m wind")
+    axes[1].plot(x, wind + 6, color=DESK_COPPER, lw=2, label="gust")
     axes[1].set_ylabel("kt")
-    axes[1].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
-    axes[2].bar(x, precip, color="#4cc9f0", label="1-h precip")
-    axes[2].plot(x, np.cumsum(precip), color="#e8eef4", label="accumulated")
+    axes[1].legend(loc="upper left", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
+    axes[2].bar(x, precip, color="#3cdb3c", label="1-h precip")
+    axes[2].plot(x, np.cumsum(precip), color=DESK_PAPER, label="accumulated")
     axes[2].set_ylabel("inches")
-    axes[2].set_xlabel("forecast hour  (12Z cycle, MST = UTC−7)", color="#8aa0b5")
-    axes[2].legend(loc="upper left", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[2].set_xlabel("forecast hour  (12Z cycle, MST = UTC−7)", color=DESK_MUTED)
+    axes[2].legend(loc="upper left", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
     axes[2].set_xticks(x[::2])
-    axes[2].set_xticklabels([f"F{i:02d}" for i in x[::2]], color="#c5d0dc")
+    axes[2].set_xticklabels([f"F{i:02d}" for i in x[::2]], color=DESK_PAPER)
     fig.tight_layout()
     fig.savefig(path, dpi=120, facecolor=fig.get_facecolor(), bbox_inches="tight")
     plt.close(fig)
@@ -308,62 +397,28 @@ def plot_placeholder(out_root: Path, cycle: str, hours: int) -> None:
     bounds = domain_bounds_from_center()
     lat2d, lon2d = _mesh(bounds)
     nframes = hours + 1
-    cmap, norm = nws_refl_cmap()
+    jobs = [
+        ("refl", "refl", nws_refl_cmap(), 5),
+        ("precip", "precip", nws_qpe_cmap(), 0.01),
+        ("t2", "t2", t2_cmap(), None),
+        ("wind", "wind", wind_cmap(), None),
+        ("cape", "cape", cape_cmap(), None),
+    ]
 
     for i in range(nframes):
         fxx = f"f{i:02d}"
         fields = _synth_fields(lat2d, lon2d, i)
-        save_overlay(
-            out_root / "refl" / f"{fxx}.png",
-            lon2d,
-            lat2d,
-            fields["refl"],
-            bounds,
-            cmap=cmap,
-            norm=norm,
-            mask_below=5,
-        )
-        save_overlay(
-            out_root / "precip" / f"{fxx}.png",
-            lon2d,
-            lat2d,
-            fields["precip"],
-            bounds,
-            cmap="YlGnBu",
-            vmin=0.01,
-            vmax=2.5,
-            mask_below=0.01,
-        )
-        save_overlay(
-            out_root / "t2" / f"{fxx}.png",
-            lon2d,
-            lat2d,
-            fields["t2"],
-            bounds,
-            cmap="turbo",
-            vmin=50,
-            vmax=120,
-        )
-        save_overlay(
-            out_root / "wind" / f"{fxx}.png",
-            lon2d,
-            lat2d,
-            fields["wind"],
-            bounds,
-            cmap="YlOrRd",
-            vmin=0,
-            vmax=50,
-        )
-        save_overlay(
-            out_root / "cape" / f"{fxx}.png",
-            lon2d,
-            lat2d,
-            fields["cape"],
-            bounds,
-            cmap="YlOrRd",
-            vmin=0,
-            vmax=4000,
-        )
+        for prod, key, (cmap, norm), mask in jobs:
+            save_overlay(
+                out_root / prod / f"{fxx}.png",
+                lon2d,
+                lat2d,
+                fields[key],
+                bounds,
+                cmap=cmap,
+                norm=norm,
+                mask_below=mask,
+            )
 
     meteo = out_root / "meteogram" / "f00.png"
     _placeholder_meteogram(meteo, cycle, hours)
@@ -393,7 +448,11 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
         "precip_acc": [],
     }
     bounds = None
-    cmap, norm = nws_refl_cmap()
+    refl_cmap, refl_norm = nws_refl_cmap()
+    precip_cmap, precip_norm = nws_qpe_cmap()
+    t2_cm, t2_norm = t2_cmap()
+    wind_cm, wind_norm = wind_cmap()
+    cape_cm, cape_norm = cape_cmap()
 
     for i, fn in enumerate(files):
         nc = Dataset(fn)
@@ -449,8 +508,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             lats,
             dbz,
             bounds,
-            cmap=cmap,
-            norm=norm,
+            cmap=refl_cmap,
+            norm=refl_norm,
             mask_below=5,
         )
         save_overlay(
@@ -459,9 +518,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             lats,
             hour / 25.4,
             bounds,
-            cmap="YlGnBu",
-            vmin=0.01,
-            vmax=2.5,
+            cmap=precip_cmap,
+            norm=precip_norm,
             mask_below=0.01,
         )
         save_overlay(
@@ -470,9 +528,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             lats,
             t2f,
             bounds,
-            cmap="turbo",
-            vmin=50,
-            vmax=120,
+            cmap=t2_cm,
+            norm=t2_norm,
         )
         save_overlay(
             out_root / "wind" / f"{fxx}.png",
@@ -480,9 +537,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             lats,
             speed,
             bounds,
-            cmap="YlOrRd",
-            vmin=0,
-            vmax=50,
+            cmap=wind_cm,
+            norm=wind_norm,
         )
         save_overlay(
             out_root / "cape" / f"{fxx}.png",
@@ -490,9 +546,8 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
             lats,
             mucape,
             bounds,
-            cmap="YlOrRd",
-            vmin=0,
-            vmax=4000,
+            cmap=cape_cm,
+            norm=cape_norm,
         )
 
         j, iidx = nearest_ij(lats, lons, KPHX[0], KPHX[1])
@@ -505,31 +560,31 @@ def plot_wrfout(wrfout_dir: Path, out_root: Path, cycle: str) -> None:
         series["precip_acc"].append(float(acc[j, iidx] / 25.4))
         nc.close()
 
-    fig, axes = plt.subplots(3, 1, figsize=(10, 7.2), sharex=True, facecolor="#121826")
+    fig, axes = plt.subplots(3, 1, figsize=(10, 7.2), sharex=True, facecolor=DESK_INK)
     x = np.arange(len(series["times"]))
     for ax in axes:
-        ax.set_facecolor("#1a2230")
-        ax.tick_params(colors="#c5d0dc")
-        ax.yaxis.label.set_color("#c5d0dc")
+        ax.set_facecolor(DESK_PANEL)
+        ax.tick_params(colors=DESK_PAPER)
+        ax.yaxis.label.set_color(DESK_PAPER)
         for spine in ax.spines.values():
-            spine.set_color("#314155")
-        ax.grid(True, alpha=0.25, color="#8aa0b5")
-    axes[0].plot(x, series["t2f"], color="#e76f51", lw=2, label="T 2 m")
-    axes[0].plot(x, series["tdf"], color="#4cc9f0", lw=2, label="Td 2 m")
+            spine.set_color(DESK_LINE)
+        ax.grid(True, alpha=0.22, color=DESK_MUTED)
+    axes[0].plot(x, series["t2f"], color=DESK_COPPER, lw=2, label="T 2 m")
+    axes[0].plot(x, series["tdf"], color=DESK_SLATE, lw=2, label="Td 2 m")
     axes[0].set_ylabel("°F")
-    axes[0].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
-    axes[0].set_title("KPHX meteogram — Phoenix 1 km WRF", color="#e8eef4", fontsize=12)
-    axes[1].plot(x, series["wspd"], color="#90be6d", lw=2, label="10 m wind")
-    axes[1].plot(x, series["gust"], color="#f4a261", lw=2, label="gust")
+    axes[0].legend(loc="upper right", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
+    axes[0].set_title("KPHX meteogram — Phoenix 1 km WRF", color=DESK_PAPER, fontsize=12)
+    axes[1].plot(x, series["wspd"], color=DESK_SAGE, lw=2, label="10 m wind")
+    axes[1].plot(x, series["gust"], color=DESK_COPPER, lw=2, label="gust")
     axes[1].set_ylabel("kt")
-    axes[1].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
-    axes[2].bar(x, series["precip_hour"], color="#4cc9f0", label="1-h precip")
-    axes[2].plot(x, series["precip_acc"], color="#e8eef4", label="accumulated")
+    axes[1].legend(loc="upper right", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
+    axes[2].bar(x, series["precip_hour"], color="#3cdb3c", label="1-h precip")
+    axes[2].plot(x, series["precip_acc"], color=DESK_PAPER, label="accumulated")
     axes[2].set_ylabel("inches")
-    axes[2].legend(loc="upper right", fontsize=8, facecolor="#121826", edgecolor="#314155", labelcolor="#e8eef4")
+    axes[2].legend(loc="upper right", fontsize=8, facecolor=DESK_INK, edgecolor=DESK_LINE, labelcolor=DESK_PAPER)
     labels = [t[5:16] for t in series["times"]]
     axes[2].set_xticks(x[:: max(1, len(x) // 10)])
-    axes[2].set_xticklabels(labels[:: max(1, len(x) // 10)], rotation=30, ha="right", color="#c5d0dc")
+    axes[2].set_xticklabels(labels[:: max(1, len(x) // 10)], rotation=30, ha="right", color=DESK_PAPER)
     fig.tight_layout()
     meteo = out_root / "meteogram" / "f00.png"
     meteo.parent.mkdir(parents=True, exist_ok=True)

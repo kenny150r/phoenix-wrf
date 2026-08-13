@@ -1,31 +1,39 @@
 :root {
-  --bg: #0b1016;
-  --panel: rgba(12, 18, 26, 0.82);
-  --panel-border: rgba(127, 224, 255, 0.18);
-  --text: #e8eef4;
-  --muted: #8aa0b5;
-  --accent: #7fe0ff;
-  --warm: #f4a261;
-  --ok: #2a9d8f;
-  --bad: #e76f51;
-  --shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --ink: #0e1114;
+  --panel: #12161a;
+  --panel-border: rgba(232, 224, 212, 0.14);
+  --text: #e8e0d4;
+  --muted: #9a8f82;
+  --copper: #c4784a;
+  --ok: #7a8f62;
+  --bad: #c45c48;
+  --shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  --radius: 3px;
+  --ui: "IBM Plex Sans", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 * { box-sizing: border-box; }
 html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  font-family: "Segoe UI", system-ui, sans-serif;
-  background: var(--bg);
+  font-family: var(--ui);
+  background: var(--ink);
   color: var(--text);
 }
 #map {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background: #0b1016;
+  background: var(--ink);
 }
-.leaflet-container { font-family: inherit; background: #0b1016; }
+.leaflet-container { font-family: var(--ui); background: var(--ink); }
+.leaflet-bar {
+  border: 1px solid var(--panel-border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow) !important;
+  overflow: hidden;
+}
 .leaflet-control-zoom {
   border: none !important;
   box-shadow: var(--shadow) !important;
@@ -34,27 +42,27 @@ html, body {
   background: var(--panel) !important;
   color: var(--text) !important;
   border: 1px solid var(--panel-border) !important;
+  border-radius: 0 !important;
   width: 32px;
   height: 32px;
   line-height: 32px;
 }
-.leaflet-control-zoom a:hover { background: rgba(127, 224, 255, 0.18) !important; }
+.leaflet-control-zoom a:hover { background: rgba(196, 120, 74, 0.16) !important; }
 .leaflet-control-attribution {
-  background: rgba(12, 18, 26, 0.7) !important;
+  background: rgba(14, 17, 20, 0.82) !important;
   color: var(--muted) !important;
+  font-family: var(--mono);
   font-size: 10px;
 }
-.leaflet-control-attribution a { color: var(--accent) !important; }
+.leaflet-control-attribution a { color: var(--copper) !important; }
 
 .panel {
   position: fixed;
   z-index: 500;
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 .panel-tl {
   top: 12px;
@@ -85,14 +93,19 @@ html, body {
 }
 .panel-meteo[hidden] { display: none; }
 
-h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
+h1 {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .sub { margin: 0.2rem 0 0.65rem; color: var(--muted); font-size: 0.75rem; line-height: 1.35; }
 .banner {
-  border-left: 3px solid var(--warm);
+  border-left: 2px solid var(--copper);
   padding: 0.4rem 0.55rem;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 0.78rem;
+  border-radius: 2px;
+  background: rgba(232, 224, 212, 0.04);
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 .banner.ok { border-color: var(--ok); }
@@ -105,33 +118,34 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
   margin-top: 0.7rem;
 }
 .products button {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(232, 224, 212, 0.04);
   color: var(--text);
-  border: 1px solid #2c3c4c;
-  border-radius: 999px;
-  padding: 0.28rem 0.7rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 0.26rem 0.62rem;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-family: var(--ui);
+  font-size: 0.75rem;
 }
-.products button:hover { border-color: var(--accent); }
+.products button:hover { border-color: var(--copper); }
 .products button.active {
-  background: var(--accent);
-  color: #082028;
-  border-color: var(--accent);
+  background: var(--copper);
+  color: var(--ink);
+  border-color: var(--copper);
   font-weight: 600;
 }
 
 .legend-title {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   margin-bottom: 0.4rem;
 }
 .legend-bar {
   height: 10px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  border: 1px solid var(--panel-border);
 }
 .legend-bar.discrete {
   display: flex;
@@ -142,11 +156,12 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
 .legend-ticks {
   display: flex;
   justify-content: space-between;
-  font-size: 0.68rem;
+  font-family: var(--mono);
+  font-size: 0.65rem;
   color: var(--muted);
   margin-top: 0.25rem;
 }
-.legend-unit { color: var(--text); font-weight: 600; }
+.legend-unit { color: var(--text); font-weight: 500; }
 .opacity-row {
   display: flex;
   align-items: center;
@@ -156,7 +171,13 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
   color: var(--muted);
 }
 .opacity-row input { flex: 1; min-width: 0; }
-#opacity-label { width: 2.4rem; text-align: right; color: var(--text); }
+#opacity-label {
+  width: 2.6rem;
+  text-align: right;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+}
 
 .time-head {
   display: flex;
@@ -165,8 +186,17 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
   margin-bottom: 0.35rem;
   font-size: 0.82rem;
 }
-#hour-label { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
-#valid-label { color: var(--muted); font-size: 0.78rem; }
+#hour-label {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--copper);
+}
+#valid-label {
+  font-family: var(--mono);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
 .slider-row {
   display: flex;
   align-items: center;
@@ -174,16 +204,17 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
 }
 .slider-row input[type="range"] { flex: 1; min-width: 0; }
 .slider-row button {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(232, 224, 212, 0.04);
   color: var(--text);
-  border: 1px solid #2c3c4c;
-  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
   padding: 0.28rem 0.55rem;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-family: var(--ui);
+  font-size: 0.75rem;
 }
-.slider-row button:hover { border-color: var(--accent); }
-#play.active { background: var(--warm); color: #1a1208; border-color: var(--warm); }
+.slider-row button:hover { border-color: var(--copper); }
+#play.active { background: var(--copper); color: var(--ink); border-color: var(--copper); }
 
 .meteo-head {
   display: flex;
@@ -199,15 +230,16 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
   cursor: pointer;
   font-size: 1rem;
 }
-#meteo-img { width: 100%; display: block; border-radius: 6px; background: #121826; }
+#meteo-img { width: 100%; display: block; border-radius: 2px; background: var(--ink); }
 .meteo-note { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.7rem; }
 
 .city-label {
   background: transparent;
   border: none;
   box-shadow: none;
-  color: #e8eef4;
-  font-weight: 650;
+  color: var(--text);
+  font-family: var(--ui);
+  font-weight: 600;
   font-size: 11px;
   text-shadow: 0 0 4px #000, 0 1px 2px #000;
 }
@@ -219,16 +251,17 @@ h1 { margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.01em; }
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  background: rgba(12, 18, 26, 0.9);
+  background: var(--panel);
   border: 1px solid var(--bad);
   color: var(--text);
   padding: 0.6rem 0.9rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   pointer-events: none;
+  font-family: var(--ui);
 }
 
 input[type="range"] {
-  accent-color: var(--accent);
+  accent-color: var(--copper);
   height: 4px;
 }
 

@@ -20,11 +20,11 @@ const LEGENDS = {
   refl: {
     title: "Reflectivity",
     unit: "dBZ",
-    ticks: ["5", "20", "35", "50", "65"],
+    ticks: ["5", "20", "35", "50", "75"],
     colors: [
-      "#00ffff", "#00b0f0", "#0070ff", "#00ff00", "#00c000",
-      "#008000", "#ffff00", "#ffc000", "#ff8000", "#ff0000",
-      "#c00000", "#800000", "#ff00ff", "#c000c0", "#800080",
+      "#00ecec", "#01a0f6", "#0100f6", "#00ff00", "#00c800",
+      "#009000", "#ffff00", "#e7c000", "#ff9000", "#ff0000",
+      "#d60000", "#c00000", "#ff00ff", "#9955c9", "#ffffff",
     ],
     discrete: true,
   },
@@ -32,25 +32,42 @@ const LEGENDS = {
     title: "1-hour precip",
     unit: "in",
     ticks: ["0.01", "0.1", "0.5", "1", "2+"],
-    gradient: "linear-gradient(to right, #ffffd9, #c7e9b4, #41b6c4, #225ea8, #081d58)",
+    colors: [
+      "#98fb98", "#00ee00", "#009b00", "#ffff4d", "#ffcc00",
+      "#ff7a00", "#ff0000", "#b00000", "#ff00ff",
+    ],
+    discrete: true,
   },
   t2: {
     title: "2 m temperature",
     unit: "°F",
     ticks: ["50", "70", "90", "110", "120"],
-    gradient: "linear-gradient(to right, #30123b, #3e9bfe, #46f884, #e1dd37, #f05b22, #7a0403)",
+    colors: [
+      "#2166ac", "#4393c3", "#74add1", "#9dc1d9", "#c5b56a",
+      "#e8d070", "#f4b942", "#ee8f2a", "#e0691e", "#d04527",
+      "#b91c1c", "#991b1b", "#7f1d1d", "#450a0a",
+    ],
+    discrete: true,
   },
   wind: {
     title: "10 m wind / gust",
     unit: "kt",
     ticks: ["0", "10", "20", "35", "50"],
-    gradient: "linear-gradient(to right, #ffffcc, #fed976, #fd8d3c, #e31a1c, #800026)",
+    colors: [
+      "#cfc4b0", "#d4b07a", "#c99050", "#c4784a", "#b45a32",
+      "#9a3c28", "#7e2828", "#641828", "#3e1018",
+    ],
+    discrete: true,
   },
   cape: {
     title: "MUCAPE",
     unit: "J kg⁻¹",
     ticks: ["0", "1000", "2000", "3000", "4000"],
-    gradient: "linear-gradient(to right, #ffffcc, #fed976, #fd8d3c, #e31a1c, #800026)",
+    colors: [
+      "#d4c48a", "#f0d060", "#f0a830", "#e07820", "#c85020",
+      "#a82828", "#8c1838", "#6e1048", "#4a0a5c",
+    ],
+    discrete: true,
   },
 };
 
@@ -97,9 +114,9 @@ map.getPane("radarPane").style.pointerEvents = "none";
 
 L.circleMarker(KPHX, {
   radius: 5,
-  color: "#f4a261",
+  color: "#c4784a",
   weight: 2,
-  fillColor: "#fff",
+  fillColor: "#e8e0d4",
   fillOpacity: 0.95,
 }).bindTooltip("KPHX", {
   permanent: true,
@@ -110,9 +127,9 @@ L.circleMarker(KPHX, {
 
 L.circleMarker(DEFAULT_CENTER, {
   radius: 3,
-  color: "#7fe0ff",
+  color: "#c4784a",
   weight: 1,
-  fillColor: "#7fe0ff",
+  fillColor: "#c4784a",
   fillOpacity: 0.9,
 }).bindTooltip("Phoenix", {
   permanent: true,
@@ -126,11 +143,11 @@ function applyBounds(next) {
   bounds = next;
   if (domainRect) map.removeLayer(domainRect);
   domainRect = L.rectangle(bounds, {
-    color: "#7fe0ff",
+    color: "#c4784a",
     weight: 1,
-    opacity: 0.4,
+    opacity: 0.45,
     fill: false,
-    dashArray: "5 6",
+    dashArray: "4 5",
     interactive: false,
   }).addTo(map);
   map.fitBounds(bounds, { padding: [48, 48], maxZoom: 10 });
