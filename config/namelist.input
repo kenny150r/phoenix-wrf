@@ -35,6 +35,7 @@
  time_step                           = 8,
  time_step_fract_num                 = 0,
  time_step_fract_den                 = 1,
+ reasonable_time_step_ratio          = 9,
  max_dom                             = 1,
  e_we                                = 201,
  e_sn                                = 201,

@@ -38,8 +38,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "$FROM" in
-  auto|download|wps|metgrid|real) ;;
-  *) echo "unknown --from $FROM (auto|download|wps|metgrid|real)" >&2; exit 2 ;;
+  auto|download|wps|metgrid|real|wrf) ;;
+  *) echo "unknown --from $FROM (auto|download|wps|metgrid|real|wrf)" >&2; exit 2 ;;
 esac
 
 CYCLE_HOUR=$(printf '%02d' "$((10#$CYCLE_HOUR))")
@@ -209,6 +209,13 @@ if [[ $FROM == auto ]]; then
   fi
 fi
 
+if [[ $FROM == wrf ]]; then
+  if [[ ! -s $ROOT/work/wrf/wrfinput_d01 || ! -s $ROOT/work/wrf/wrfbdy_d01 ]]; then
+    echo "wrfinput/wrfbdy missing; falling back to real.exe"
+    FROM=real
+  fi
+fi
+
 # Requested metgrid resume without FILE:/SFC: can still use existing met_em.
 if [[ $FROM == metgrid && ( $n_file -lt $NEED_MET || $n_sfc -lt $NEED_MET ) ]]; then
   if [[ $n_met -ge $NEED_MET ]]; then
@@ -360,18 +367,25 @@ for f in "$WRF_SRC/run/"*; do
 done
 ln -sfn "$WRF_SRC/main/real.exe" .
 ln -sfn "$WRF_SRC/main/wrf.exe" .
-rm -f met_em.d01.* wrfout_d01_* wrfinput_d01 wrfbdy_d01 rsl.*
-ln -sfn "$WPS"/met_em.d01.* .
+if [[ $FROM == wrf ]]; then
+  rm -f wrfout_d01_* rsl.*
+  echo "reusing wrfinput_d01 / wrfbdy_d01 (FROM=wrf)"
+else
+  rm -f met_em.d01.* wrfout_d01_* wrfinput_d01 wrfbdy_d01 rsl.*
+  ln -sfn "$WPS"/met_em.d01.* .
+fi
 cp -f "$ROOT/config/namelist.input" namelist.input
 cp -f "$ROOT/config/iofields.txt" iofields.txt
 python3 "$ROOT/scripts/update_namelist.py" --input namelist.input --date "$DATE" --hours "$HOURS" \
   --cycle-hour "$CYCLE_HOUR" ${NMET:+--nmet "$NMET"} ${NSOIL:+--nsoil "$NSOIL"}
 
-echo "=== real.exe ==="
-STAGE_LABEL="real.exe"
-need_free_kb "$MIN_FREE_KB" "Free space before real.exe." || exit 1
-phx_status --status running --stage real --stage-label "Running real.exe"
-./real.exe
+if [[ $FROM != wrf ]]; then
+  echo "=== real.exe ==="
+  STAGE_LABEL="real.exe"
+  need_free_kb "$MIN_FREE_KB" "Free space before real.exe." || exit 1
+  phx_status --status running --stage real --stage-label "Running real.exe"
+  ./real.exe
+fi
 
 echo "=== wrf.exe np=4 hours=$HOURS ==="
 STAGE_LABEL="wrf.exe"
