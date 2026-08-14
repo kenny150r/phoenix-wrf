@@ -1,9 +1,20 @@
 #!/bin/bash
 # Compile WRF 4.6.1 (GNU dmpar) and WPS 4.6.0. Do not use Anaconda MPI.
+# After a live wrf.exe finishes, rebuild with AVX on this i7-3770:
+#   FORCE_REBUILD=1 bash /home/kenny/phoenix-wrf/scripts/compile_wrf.sh
+# Do not FORCE_REBUILD while wrf.exe is running (it unlinks main/wrf.exe).
 set -euo pipefail
 ROOT="/home/kenny/phoenix-wrf"
 # shellcheck disable=SC1091
 source "$ROOT/env.sh"
+
+FORCE_REBUILD="${FORCE_REBUILD:-0}"
+if [[ $FORCE_REBUILD == 1 ]]; then
+  if pgrep -x wrf.exe >/dev/null 2>&1; then
+    echo "FATAL: wrf.exe is running; refusing FORCE_REBUILD (would replace the live binary)." >&2
+    exit 1
+  fi
+fi
 
 LOG="$ROOT/data/logs/compile.log"
 mkdir -p "$ROOT/data/logs" "$ROOT/src" "$ROOT/opt/grib2"
@@ -74,9 +85,7 @@ done < <(grep -rlZ '^#!.*csh' . --include='*' 2>/dev/null || true)
 # Ubuntu netCDF libs live in lib/x86_64-linux-gnu; our combined prefix uses lib/
 sed -i 's#$NETCDF/lib#$NETCDF/lib#g' configure || true
 
-if [[ ! -f configure.wrf ]]; then
-  echo "=== configuring WRF (GNU dmpar, basic nesting) ==="
-  printf '34\n1\n' | ./configure
+patch_configure_wrf() {
   # Link netcdff explicitly if configure missed it
   if grep -q -- '-lnetcdf' configure.wrf && ! grep -q -- '-lnetcdff' configure.wrf; then
     sed -i 's/-lnetcdf/-lnetcdff -lnetcdf/g' configure.wrf
@@ -87,6 +96,24 @@ if [[ ! -f configure.wrf ]]; then
   sed -i "s|^CCOMP *=.*|CCOMP = gcc|" configure.wrf
   sed -i "s|^DM_FC *=.*|DM_FC = mpif90|" configure.wrf
   sed -i "s|^DM_CC *=.*|DM_CC = mpicc -DMPI2_SUPPORT|" configure.wrf
+  # i7-3770 (Ivy Bridge): -O2 stays; -march=native enables AVX. Do not use -O3 (WRF).
+  if grep -q '^FCOPTIM' configure.wrf && ! grep -q -- '-march=native' configure.wrf; then
+    sed -i 's/^FCOPTIM.*/FCOPTIM         =       -O2 -ftree-vectorize -funroll-loops -march=native/' configure.wrf
+    echo "patched FCOPTIM += -march=native"
+  fi
+}
+
+if [[ $FORCE_REBUILD == 1 ]]; then
+  echo "=== FORCE_REBUILD: ./clean -a (configure.wrf will be regenerated) ==="
+  ./clean -a || true
+fi
+
+if [[ ! -f configure.wrf ]]; then
+  echo "=== configuring WRF (GNU dmpar, basic nesting) ==="
+  printf '34\n1\n' | ./configure
+fi
+if [[ -f configure.wrf ]]; then
+  patch_configure_wrf
 fi
 
 ensure_md_calls() {
@@ -128,10 +155,10 @@ relink_wrf() {
   )
 }
 
-if [[ ! -x main/wrf.exe ]]; then
+if [[ $FORCE_REBUILD == 1 || ! -x main/wrf.exe ]]; then
   echo "=== compiling WRF em_real (this takes a while) ==="
   # Do not ./clean if objects already exist — make -i often just needs a relink.
-  if [[ ! -f main/libwrflib.a ]]; then
+  if [[ $FORCE_REBUILD != 1 && ! -f main/libwrflib.a ]]; then
     ./clean || true
   fi
   ensure_md_calls

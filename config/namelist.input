@@ -28,7 +28,7 @@
  debug_level                         = 0,
  iofields_filename                   = "iofields.txt",
  ignore_iofields_warning             = .true.,
- nwp_diagnostics                     = 1,
+ nwp_diagnostics                     = 0,
 /
 
 &domains
@@ -81,19 +81,19 @@
  num_soil_layers                     = 4,
  num_land_cat                        = 21,
  sf_urban_physics                    = 0,
- do_radar_ref                        = 1,
+ do_radar_ref                        = 0,
 /
 
 &afwa
- afwa_diag_opt                       = 1,
+ afwa_diag_opt                       = 0,
  afwa_ptype_opt                      = 0,
  afwa_vil_opt                        = 0,
  afwa_radar_opt                      = 0,
- afwa_severe_opt                     = 1,
+ afwa_severe_opt                     = 0,
  afwa_icing_opt                      = 0,
  afwa_vis_opt                        = 0,
  afwa_cloud_opt                      = 0,
- afwa_therm_opt                      = 1,
+ afwa_therm_opt                      = 0,
  afwa_turb_opt                       = 0,
  afwa_buoy_opt                       = 0,
 /
